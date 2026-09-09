@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: SQAO Live Deriv API
-  version: 1.0.0
-  description: Read-only market-data API for the SQAO custom GPT.
+  version: 1.1.0
+  description: Read-only market-data API for SQAO GPT. Provides live Deriv Step Index MTF data for reconciliation with uploaded charts.
 servers:
-  - url: https://REPLACE-WITH-SQAO-API-HOST
+  - url: https://sqao-live-api.onrender.com
 security:
   - SQAOKey: []
 paths:
@@ -69,8 +69,8 @@ paths:
   /analysis/snapshot:
     get:
       operationId: getSQAOQuantSnapshot
-      summary: Get a read-only MTF quantitative snapshot for Step Index
-      description: Returns D1, H1, M15, M5 and M1 recent candles plus a simple direction proxy. This is market data, not a guaranteed prediction or historical win rate.
+      summary: Get live read-only MTF quantitative snapshot for Step Index
+      description: Returns D1, H1, M15, M5 and M1 recent Deriv candles plus a direction proxy and latest close for each timeframe. The proxy is not a trading signal and is not a historical win rate.
       parameters:
         - name: symbol
           in: query
@@ -78,7 +78,7 @@ paths:
           schema: {type: string, default: stpRNG}
       responses:
         '200':
-          description: MTF snapshot
+          description: Live MTF snapshot
           content:
             application/json:
               schema:
