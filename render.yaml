@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: sqao-live-api
+    runtime: docker
+    dockerfilePath: ./API/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: SQAO_ACTION_KEY
+        generateValue: true
