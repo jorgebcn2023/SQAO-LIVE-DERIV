@@ -1,48 +1,42 @@
-# SQAO-LIVE-DERIV v2.3
+# SQAO-LIVE-DERIV v2.4
 
-Sistema de análisis **read-only** para Step Index con datos de mercado de Deriv.
+Sistema de análisis **read-only** para Step Index con datos de mercado de Deriv y una capa multimodal GPT.
 
-## Qué hace
+## Arquitectura
 
-`Deriv active_symbols -> histórico M1/M5/M15/H1/D1 -> ticks en vivo -> OHLC -> análisis SQAO -> DATA/live_analysis.json`
+`Deriv -> OHLC M1/M5/M15/H1/D1 -> SQAO -> snapshot cuantitativo -> GPT Vision + gráficos -> análisis combinado`
 
-El conector usa el WebSocket público actual de Deriv. Para datos públicos de mercado **no hace falta API Token**.
+El conector usa el WebSocket público actual de Deriv. Para datos públicos de mercado no hace falta API Token.
 
-## Codespaces
-
-El repositorio incluye configuración de Dev Container. Al crear/reconstruir un Codespace se ejecuta automáticamente `RUN-CODESPACE.sh`, que:
-
-1. crea `.venv`;
-2. instala dependencias;
-3. compila `ENGINE` y `CONNECTOR` para detectar errores de sintaxis;
-4. ejecuta las pruebas;
-5. valida el pipeline.
-
-Si el Codespace ya existía, ejecutar una vez:
-
-```bash
-bash RUN-CODESPACE.sh
-```
-
-## Arranque en vivo
+## Datos en vivo
 
 ```bash
 source .venv/bin/activate
 python -m CONNECTOR.deriv_live
 ```
 
-El conector:
+El conector descarga 500 velas por defecto en M1/M5/M15/H1/D1, mantiene ticks, construye OHLC, se reconecta automáticamente y actualiza `DATA/live_analysis.json` al completar cada M1.
 
-- autodetecta el Step Index;
-- descarga 500 velas por defecto en M1/M5/M15/H1/D1;
-- mantiene ticks en `DATA/ticks.ndjson`;
-- construye OHLC en vivo;
-- se reconecta automáticamente si se corta el WebSocket;
-- actualiza `DATA/live_analysis.json` al completar cada vela M1.
+## Interfaz GPT para subir gráficos
 
-## Configuración
+Primero configura la clave de OpenAI **fuera del repositorio**:
 
-Variables disponibles:
+```bash
+export OPENAI_API_KEY='TU_CLAVE'
+export OPENAI_MODEL='gpt-5.6-luna'
+```
+
+Después:
+
+```bash
+streamlit run AI/app.py --server.address 0.0.0.0 --server.port 8501
+```
+
+En el navegador del Codespace abre el puerto 8501. Puedes subir simultáneamente D1, H1, M15, M5 y M1. GPT recibe las imágenes como un conjunto MTF y, si existe, también recibe `DATA/live_analysis.json`.
+
+El resultado se muestra en pantalla y se guarda en `DATA/gpt_analysis.md`.
+
+## Variables Deriv
 
 ```text
 DERIV_SYMBOL=AUTO
@@ -55,8 +49,8 @@ Si existen varios Step Index y se quiere seleccionar uno concreto, usar `DERIV_S
 
 ## Seguridad
 
-Esta versión es exclusivamente de lectura. No implementa `proposal`, `buy`, `sell` ni otras operaciones de trading. No guardar PAT/API Tokens en el repositorio público. Para autenticación futura, usar variables de entorno o Codespaces Secrets.
+Esta versión sigue siendo exclusivamente de lectura respecto de Deriv. No implementa `proposal`, `buy` ni `sell`. La clave `OPENAI_API_KEY` no debe guardarse en GitHub ni en archivos versionados; usar una variable de entorno o un Secret del Codespace.
 
-## Estado del análisis
+## Interpretación
 
-Las puntuaciones del motor son `MODEL_ESTIMATE` hasta disponer de un backtest válido. No se presentan como win rate histórico.
+GPT aporta análisis visual y el motor SQAO aporta análisis cuantitativo. Las probabilidades producidas por el modelo son `MODEL_ESTIMATE`, no win rate histórico. El sistema no garantiza resultados futuros ni rentabilidad.
