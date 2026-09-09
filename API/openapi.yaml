@@ -1,0 +1,60 @@
+openapi: 3.0.3
+info:
+  title: SQAO Live API
+  version: 1.0.0
+servers:
+  - url: https://sqao-live-api-v2.onrender.com
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Check API health
+      responses:
+        '200':
+          description: Healthy
+  /market/active-symbols:
+    get:
+      operationId: getStepIndexSymbols
+      summary: Get available Step Index symbols
+      responses:
+        '200':
+          description: Step Index symbols
+  /market/ohlc:
+    get:
+      operationId: getOhlc
+      summary: Get Step Index OHLC candles
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+            default: stpRNG
+        - name: timeframe
+          in: query
+          schema:
+            type: string
+            enum: [M1, M5, M15, H1, D1]
+            default: M1
+        - name: count
+          in: query
+          schema:
+            type: integer
+            minimum: 10
+            maximum: 500
+            default: 120
+      responses:
+        '200':
+          description: OHLC candles
+  /analysis/snapshot:
+    get:
+      operationId: getMtfSnapshot
+      summary: Get D1 H1 M15 M5 M1 market snapshot
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+            default: stpRNG
+      responses:
+        '200':
+          description: MTF snapshot
