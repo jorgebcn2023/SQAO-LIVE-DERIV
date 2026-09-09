@@ -6,7 +6,7 @@ Sistema de análisis **read-only** para Step Index con datos públicos de mercad
 
 `Deriv public WS -> Step Index AUTO -> D1/H1/M15/M5/M1 -> indicadores cuantitativos -> decisión conservadora -> GPT Vision + gráficos -> reconciliación cuant/visual`
 
-La documentación actual de Deriv confirma que el WebSocket público `wss://api.derivws.com/trading/v1/options/ws/public` permite datos de mercado sin autenticación, incluidos `active_symbols` y `ticks_history`. citeturn0search0turn0search6
+El backend usa el WebSocket público actual de Deriv para datos de mercado sin autenticación.
 
 ## Componentes
 
@@ -70,7 +70,7 @@ Si Deriv LIVE no está disponible, el sistema lo marca y puede usar `DATA/live_a
 
 ## Seguridad
 
-No hay operaciones de trading: no se implementan `proposal`, `buy` ni `sell`. Las claves OpenAI/SQAO deben permanecer fuera de GitHub. La API pública de Deriv usada aquí no requiere token para datos de mercado. citeturn0search0turn0search4
+No hay operaciones de trading: no se implementan `proposal`, `buy` ni `sell`. Las claves OpenAI/SQAO deben permanecer fuera de GitHub. La API pública de Deriv usada aquí no requiere token para datos de mercado.
 
 ## Validación
 
