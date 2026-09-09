@@ -1,0 +1,91 @@
+openapi: 3.1.0
+info:
+  title: SQAO Live Deriv API
+  version: 1.0.0
+  description: Read-only market-data API for the SQAO custom GPT.
+servers:
+  - url: https://REPLACE-WITH-SQAO-API-HOST
+security:
+  - SQAOKey: []
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Check SQAO API health
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+  /market/active-symbols:
+    get:
+      operationId: getActiveStepSymbols
+      summary: List available Deriv Step Index symbols
+      responses:
+        '200':
+          description: Step Index symbols
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  symbols:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        symbol: {type: string}
+                        display_name: {type: string}
+  /market/ohlc:
+    get:
+      operationId: getStepOHLC
+      summary: Get recent OHLC candles for a Step Index timeframe
+      parameters:
+        - name: symbol
+          in: query
+          required: false
+          schema: {type: string, default: stpRNG}
+        - name: timeframe
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [M1, M5, M15, H1, D1]
+            default: M1
+        - name: count
+          in: query
+          required: false
+          schema: {type: integer, minimum: 10, maximum: 500, default: 120}
+      responses:
+        '200':
+          description: OHLC candles
+          content:
+            application/json:
+              schema:
+                type: object
+  /analysis/snapshot:
+    get:
+      operationId: getSQAOQuantSnapshot
+      summary: Get a read-only MTF quantitative snapshot for Step Index
+      description: Returns D1, H1, M15, M5 and M1 recent candles plus a simple direction proxy. This is market data, not a guaranteed prediction or historical win rate.
+      parameters:
+        - name: symbol
+          in: query
+          required: false
+          schema: {type: string, default: stpRNG}
+      responses:
+        '200':
+          description: MTF snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  securitySchemes:
+    SQAOKey:
+      type: apiKey
+      in: header
+      name: X-SQAO-Key
