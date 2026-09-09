@@ -1,71 +1,81 @@
-# SQAO-LIVE-DERIV v2.5
+# SQAO-LIVE-DERIV v2.6
 
-Sistema de análisis **read-only** para Step Index con datos de mercado de Deriv, motor cuantitativo SQAO y capa multimodal GPT.
+Sistema de análisis **read-only** para Step Index con datos públicos de mercado de Deriv, motor cuantitativo SQAO y capa multimodal GPT.
 
 ## Arquitectura
 
-`Deriv -> OHLC M1/M5/M15/H1/D1 -> SQAO -> snapshot LIVE -> GPT Vision + gráficos -> reconciliación cuant/visual -> LONG/SHORT/WAIT/NO_TRADE`
+`Deriv public WS -> Step Index AUTO -> D1/H1/M15/M5/M1 -> indicadores cuantitativos -> decisión conservadora -> GPT Vision + gráficos -> reconciliación cuant/visual`
 
-El conector usa el WebSocket público actual de Deriv. Para datos públicos de mercado no hace falta API Token.
+La documentación actual de Deriv confirma que el WebSocket público `wss://api.derivws.com/trading/v1/options/ws/public` permite datos de mercado sin autenticación, incluidos `active_symbols` y `ticks_history`. citeturn0search0turn0search6
 
-## Datos en vivo
+## Componentes
 
-```bash
-source .venv/bin/activate
-python -m CONNECTOR.deriv_live
-```
+- `CONNECTOR/deriv_live.py`: conexión persistente de ticks, OHLC M1/M5/M15/H1/D1, reconexión y snapshot local.
+- `ENGINE/live_pipeline.py`: EMA10/EMA20, RSI14, ATR14, rangos, alineación MTF y decisión conservadora.
+- `ENGINE/predictive.py`: escenarios condicionales de 60 minutos como `MODEL_ESTIMATE`.
+- `API/app.py`: API FastAPI read-only en Render; autodetecta el Step Index cuando `symbol=AUTO`.
+- `AI/app.py`: interfaz Streamlit para datos LIVE y carga de gráficos.
+- `AI/gpt_vision.py`: reconciliación entre cuantitativo y visión.
+- `GPT/openapi.yaml`: especificación para integrar el backend como Action/API de GPT.
 
-El conector descarga 500 velas por defecto en M1/M5/M15/H1/D1, mantiene ticks, construye OHLC, se reconecta automáticamente y actualiza `DATA/live_analysis.json` al completar cada M1.
+## Decisiones
+
+El motor solo devuelve `LONG`, `SHORT`, `WAIT` o `NO_TRADE`. En modo conservador, una entrada direccional requiere alineación MTF completa y confirmación en M5; en caso contrario favorece `WAIT`/`NO_TRADE`.
+
+Las probabilidades y escenarios son `MODEL_ESTIMATE`. No son win rate histórico y no implican rentabilidad garantizada.
 
 ## API LIVE
 
-Render expone el backend read-only. Por defecto la interfaz GPT usa:
+Backend Render:
 
 `https://sqao-live-api.onrender.com`
+
+Endpoints principales:
+
+- `/health`
+- `/market/active-symbols`
+- `/market/ohlc?symbol=AUTO&timeframe=M1&count=120`
+- `/analysis/snapshot?symbol=AUTO&count=120`
 
 Variables opcionales:
 
 ```text
 SQAO_API_URL=https://sqao-live-api.onrender.com
 SQAO_ACTION_KEY=...
+DERIV_SYMBOL=AUTO
+DERIV_STEP_NAME=...
+SQAO_HISTORY_CANDLES=500
 ```
 
-La interfaz intenta primero `/analysis/snapshot` en vivo. Si no puede acceder, utiliza `DATA/live_analysis.json` local como fallback y lo declara explícitamente en pantalla.
-
-## Interfaz GPT + gráficos
-
-Configura las claves fuera del repositorio:
+## Streamlit
 
 ```bash
-export OPENAI_API_KEY='TU_CLAVE'
-export OPENAI_MODEL='gpt-5.6'
-```
-
-Después:
-
-```bash
+source .venv/bin/activate
 streamlit run AI/app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
-Puedes subir simultáneamente D1, H1, M15, M5 y M1. Se recomienda nombrarlos `D1.png`, `H1.png`, `M15.png`, `M5.png` y `M1.png`, aunque GPT también usa las etiquetas visibles del gráfico.
+La interfaz permite introducir la URL de API, clave SQAO opcional, clave OpenAI de sesión, modelo y símbolo. `AUTO` autodetecta el Step Index activo.
 
-El flujo ahora:
+Sube `D1`, `H1`, `M15`, `M5` y `M1`. El sistema:
 
-1. Obtiene el snapshot MTF cuantitativo de Deriv LIVE.
-2. Recibe las imágenes MTF.
-3. Identifica cada timeframe.
-4. Comprueba datos faltantes, duplicados y posibles inconsistencias temporales.
-5. Compara dirección cuantitativa frente a estructura visual.
-6. Señala desacuerdos entre cuantitativo y visión.
-7. Produce una única decisión conservadora: `LONG`, `SHORT`, `WAIT` o `NO_TRADE`.
-8. Genera escenarios condicionales a 60 minutos e invalidaciones.
+1. Obtiene datos LIVE de Deriv.
+2. Calcula el snapshot cuantitativo.
+3. Comprueba completitud y alineación MTF.
+4. Recibe los cinco gráficos.
+5. Compara cuantitativo vs. visión.
+6. Detecta inconsistencias temporales.
+7. Produce una decisión única y escenarios de 60 minutos.
 
-El resultado se muestra en pantalla y se guarda en `DATA/gpt_analysis.md`.
+Si Deriv LIVE no está disponible, el sistema lo marca y puede usar `DATA/live_analysis.json` como fallback local; nunca debe presentarlo como LIVE.
 
 ## Seguridad
 
-Esta versión sigue siendo exclusivamente de lectura respecto de Deriv. No implementa `proposal`, `buy` ni `sell`. Las claves `OPENAI_API_KEY` y `SQAO_ACTION_KEY` no deben guardarse en GitHub ni en archivos versionados; usar Secrets/variables de entorno.
+No hay operaciones de trading: no se implementan `proposal`, `buy` ni `sell`. Las claves OpenAI/SQAO deben permanecer fuera de GitHub. La API pública de Deriv usada aquí no requiere token para datos de mercado. citeturn0search0turn0search4
 
-## Interpretación
+## Validación
 
-GPT aporta análisis visual y el motor SQAO aporta datos cuantitativos. Las probabilidades producidas por el modelo son `MODEL_ESTIMATE`, no win rate histórico. El sistema no garantiza resultados futuros ni rentabilidad. Si las fuentes no están sincronizadas o faltan datos, el sistema debe reducir confianza y favorecer `WAIT`/`NO_TRADE`.
+```bash
+bash RUN-CODESPACE.sh
+```
+
+El script compila el código y ejecuta las pruebas del motor antes de iniciar cualquier proceso LIVE.
