@@ -1,8 +1,9 @@
+import json
 import os
 from typing import Any
 
 import websockets
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 
 DERIV_WS = os.getenv("DERIV_PUBLIC_WS", "wss://api.derivws.com/trading/v1/options/ws/public")
 API_KEY = os.getenv("SQAO_ACTION_KEY", "")
@@ -17,20 +18,19 @@ def _auth_ok(key: str | None) -> bool:
 async def _deriv_request(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         async with websockets.connect(DERIV_WS, open_timeout=10, close_timeout=5) as ws:
-            await ws.send(__import__("json").dumps(payload))
-            raw = await ws.recv()
-            return __import__("json").loads(raw)
+            await ws.send(json.dumps(payload))
+            return json.loads(await ws.recv())
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Deriv public API unavailable: {exc}") from exc
 
 
 @app.get("/health")
-async def health() -> dict[str, Any]:
+async def health():
     return {"status": "ok", "service": "SQAO Live API", "version": "1.0.0"}
 
 
 @app.get("/market/active-symbols")
-async def active_symbols(x_sqao_key: str | None = Query(default=None, alias="X-SQAO-Key")):
+async def active_symbols(x_sqao_key: str | None = Header(default=None, alias="X-SQAO-Key")):
     if not _auth_ok(x_sqao_key):
         raise HTTPException(status_code=401, detail="Invalid SQAO API key")
     data = await _deriv_request({"active_symbols": "brief", "product_type": "basic"})
@@ -49,7 +49,7 @@ async def ohlc(
     symbol: str = Query(default="stpRNG", description="Deriv Step Index symbol"),
     timeframe: str = Query(default="M1", pattern="^(M1|M5|M15|H1|D1)$"),
     count: int = Query(default=120, ge=10, le=500),
-    x_sqao_key: str | None = Query(default=None, alias="X-SQAO-Key"),
+    x_sqao_key: str | None = Header(default=None, alias="X-SQAO-Key"),
 ):
     if not _auth_ok(x_sqao_key):
         raise HTTPException(status_code=401, detail="Invalid SQAO API key")
@@ -66,20 +66,13 @@ async def ohlc(
     if "error" in data:
         raise HTTPException(status_code=502, detail=data["error"].get("message", "Deriv error"))
     candles = data.get("candles", [])
-    return {
-        "symbol": symbol,
-        "timeframe": timeframe,
-        "granularity_seconds": granularity,
-        "count": len(candles),
-        "candles": candles,
-        "source": "Deriv public market data",
-    }
+    return {"symbol": symbol, "timeframe": timeframe, "granularity_seconds": granularity, "count": len(candles), "candles": candles, "source": "Deriv public market data"}
 
 
 @app.get("/analysis/snapshot")
 async def analysis_snapshot(
     symbol: str = Query(default="stpRNG"),
-    x_sqao_key: str | None = Query(default=None, alias="X-SQAO-Key"),
+    x_sqao_key: str | None = Header(default=None, alias="X-SQAO-Key"),
 ):
     if not _auth_ok(x_sqao_key):
         raise HTTPException(status_code=401, detail="Invalid SQAO API key")
@@ -94,10 +87,6 @@ async def analysis_snapshot(
             direction = "BULLISH" if fast > slow else "BEARISH" if fast < slow else "NEUTRAL"
         else:
             direction = "UNKNOWN"
-        result["timeframes"][tf] = {
-            "direction_proxy": direction,
-            "latest_close": closes[-1] if closes else None,
-            "candles": candles,
-        }
+        result["timeframes"][tf] = {"direction_proxy": direction, "latest_close": closes[-1] if closes else None, "candles": candles}
     result["decision_note"] = "direction_proxy is a quantitative proxy, not a trading signal or historical win rate"
     return result
