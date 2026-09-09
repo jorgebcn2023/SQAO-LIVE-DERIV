@@ -1,28 +1,51 @@
-# SQAO-LIVE-DERIV v2.6
+# SQAO-LIVE-DERIV v3.2.1
 
-Sistema de análisis **read-only** para Step Index con datos públicos de mercado de Deriv, motor cuantitativo SQAO y capa multimodal GPT.
+Sistema de análisis **read-only** para Synthetic Indices de Deriv, con motor cuantitativo SQAO, análisis MTF y capa multimodal GPT.
 
 ## Arquitectura
 
-`Deriv public WS -> Step Index AUTO -> D1/H1/M15/M5/M1 -> indicadores cuantitativos -> decisión conservadora -> GPT Vision + gráficos -> reconciliación cuant/visual`
+`Deriv public WS -> Synthetic Discovery -> historical research -> MTF analysis D1/H1/M15/M5/M1 -> risk-adjusted ranking -> GPT Vision -> conservative decision`
 
-El backend usa el WebSocket público actual de Deriv para datos de mercado sin autenticación.
+El backend usa el WebSocket público de Deriv para datos de mercado sin autenticación.
 
-## Componentes
+## Componentes principales
 
-- `CONNECTOR/deriv_live.py`: conexión persistente de ticks, OHLC M1/M5/M15/H1/D1, reconexión y snapshot local.
+- `CONNECTOR/deriv_live.py`: conexión persistente de ticks/OHLC y snapshot local.
 - `ENGINE/live_pipeline.py`: EMA10/EMA20, RSI14, ATR14, rangos, alineación MTF y decisión conservadora.
-- `ENGINE/predictive.py`: escenarios condicionales de 60 minutos como `MODEL_ESTIMATE`.
-- `API/app.py`: API FastAPI read-only en Render; autodetecta el Step Index cuando `symbol=AUTO`.
-- `AI/app.py`: interfaz Streamlit para datos LIVE y carga de gráficos.
-- `AI/gpt_vision.py`: reconciliación entre cuantitativo y visión.
-- `GPT/openapi.yaml`: especificación para integrar el backend como Action/API de GPT.
+- `ENGINE/synthetic_scanner.py`: clasificación de familias Synthetic y `SAFETY/MODELABILITY/MTF/SETUP/COMPOSITE` scores.
+- `ENGINE/synthetic_research.py`: descubrimiento dinámico, históricos M5, backtest reproducible, expectancy, profit factor, drawdown, Sharpe, Sortino y walk-forward.
+- `ENGINE/predictive.py`: escenarios condicionales como `MODEL_ESTIMATE`.
+- `API/app.py`: API FastAPI read-only en Render.
+- `AI/app.py`: interfaz Streamlit.
+- `AI/gpt_vision.py`: reconciliación cuantitativo/visual.
+- `GPT/openapi.yaml`: especificación para integrar el backend con GPT.
+- `.github/workflows/test.yml`: CI del motor y smoke test Deriv.
+- `.github/workflows/synthetic-research.yml`: investigación programada cada 6 horas y publicación del ranking como artifact.
 
-## Decisiones
+## Research Engine
 
-El motor solo devuelve `LONG`, `SHORT`, `WAIT` o `NO_TRADE`. En modo conservador, una entrada direccional requiere alineación MTF completa y confirmación en M5; en caso contrario favorece `WAIT`/`NO_TRADE`.
+El ranking histórico no asume que un índice sea siempre rentable. Para cada Synthetic Index descubierto se calcula una estrategia reproducible basada en EMA10/EMA20, ruptura de 20 velas y ATR14, y se evalúa con:
 
-Las probabilidades y escenarios son `MODEL_ESTIMATE`. No son win rate histórico y no implican rentabilidad garantizada.
+- Win rate
+- Expectancy en R
+- Profit factor
+- Max drawdown
+- Sharpe
+- Sortino
+- Walk-forward expectancy
+- Score ajustado por riesgo
+
+Los resultados son **diagnóstico histórico** y no constituyen una predicción ni garantía de rentabilidad futura.
+
+## GitHub Actions
+
+El workflow `SQAO Synthetic Research` se ejecuta:
+
+- automáticamente cada 6 horas;
+- manualmente mediante `workflow_dispatch`;
+- cuando cambian los componentes del research engine en `main`.
+
+El resultado se guarda como artifact `sqao-synthetic-research-*` durante 14 días.
 
 ## API LIVE
 
@@ -37,45 +60,15 @@ Endpoints principales:
 - `/market/ohlc?symbol=AUTO&timeframe=M1&count=120`
 - `/analysis/snapshot?symbol=AUTO&count=120`
 
-Variables opcionales:
-
-```text
-SQAO_API_URL=https://sqao-live-api.onrender.com
-SQAO_ACTION_KEY=...
-DERIV_SYMBOL=AUTO
-DERIV_STEP_NAME=...
-SQAO_HISTORY_CANDLES=500
-```
-
-## Streamlit
-
-```bash
-source .venv/bin/activate
-streamlit run AI/app.py --server.address 0.0.0.0 --server.port 8501
-```
-
-La interfaz permite introducir la URL de API, clave SQAO opcional, clave OpenAI de sesión, modelo y símbolo. `AUTO` autodetecta el Step Index activo.
-
-Sube `D1`, `H1`, `M15`, `M5` y `M1`. El sistema:
-
-1. Obtiene datos LIVE de Deriv.
-2. Calcula el snapshot cuantitativo.
-3. Comprueba completitud y alineación MTF.
-4. Recibe los cinco gráficos.
-5. Compara cuantitativo vs. visión.
-6. Detecta inconsistencias temporales.
-7. Produce una decisión única y escenarios de 60 minutos.
-
-Si Deriv LIVE no está disponible, el sistema lo marca y puede usar `DATA/live_analysis.json` como fallback local; nunca debe presentarlo como LIVE.
-
 ## Seguridad
 
-No hay operaciones de trading: no se implementan `proposal`, `buy` ni `sell`. Las claves OpenAI/SQAO deben permanecer fuera de GitHub. La API pública de Deriv usada aquí no requiere token para datos de mercado.
+No hay operaciones de trading: no se implementan `proposal`, `buy` ni `sell`. Las claves OpenAI/SQAO deben permanecer fuera de GitHub. El research engine utiliza únicamente datos públicos de mercado.
 
 ## Validación
 
 ```bash
 bash RUN-CODESPACE.sh
+python -m compileall -q API AI ENGINE CONNECTOR
+python -m ENGINE.tests
+python -m ENGINE.synthetic_research
 ```
-
-El script compila el código y ejecuta las pruebas del motor antes de iniciar cualquier proceso LIVE.

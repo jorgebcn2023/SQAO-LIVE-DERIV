@@ -1,0 +1,76 @@
+name: SQAO Synthetic Research
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'ENGINE/synthetic_scanner.py'
+      - 'ENGINE/synthetic_research.py'
+      - 'ENGINE/requirements.txt'
+      - '.github/workflows/synthetic-research.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sqao-synthetic-research
+  cancel-in-progress: true
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ENGINE/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r ENGINE/requirements.txt
+
+      - name: Compile and unit-test research engine
+        run: |
+          python -m compileall -q ENGINE
+          python -m ENGINE.tests
+
+      - name: Run Deriv synthetic research
+        env:
+          DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
+          SQAO_RESEARCH_TF: M5
+          SQAO_RESEARCH_CANDLES: '2500'
+          SQAO_RESEARCH_CONCURRENCY: '4'
+          SQAO_DATA_DIR: DATA
+        run: python -m ENGINE.synthetic_research
+
+      - name: Validate research output
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('DATA/synthetic_research.json')
+          if not p.exists():
+              raise SystemExit('Research output was not created')
+          data=json.loads(p.read_text(encoding='utf-8'))
+          if not isinstance(data.get('results'), list):
+              raise SystemExit('Invalid research result format')
+          print('SQAO_RESEARCH_OK', 'symbols=', data.get('count_scanned'), 'results=', len(data['results']))
+          for x in data['results'][:10]:
+              print(f"RANK {x.get('rank')} SYMBOL {x.get('symbol')} FAMILY {x.get('family')} SCORE {x.get('score')}")
+          PY
+
+      - name: Publish research artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqao-synthetic-research-${{ github.run_number }}
+          path: DATA/synthetic_research.json
+          if-no-files-found: error
+          retention-days: 14
