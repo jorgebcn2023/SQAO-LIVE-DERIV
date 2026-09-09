@@ -35,5 +35,29 @@ jobs:
                   if not steps:
                       raise RuntimeError('No Step Index symbol returned by Deriv')
                   print('DERIV_PUBLIC_WS_OK', steps[:10])
+                  for i,(name,sym) in enumerate(steps[:10], start=2000):
+                      await ws.send(json.dumps({'ticks':sym,'subscribe':0,'req_id':i}))
+                  quotes={}
+                  for _ in range(len(steps[:10])):
+                      tick=json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
+                      if tick.get('error'):
+                          raise RuntimeError(tick['error'])
+                      req=tick.get('req_id')
+                      q=tick.get('tick',{}).get('quote')
+                      if req is not None and q is not None:
+                          quotes[req]=q
+                  for i,(name,sym) in enumerate(steps[:10], start=2000):
+                      print(f'STEP_INDEX_QUOTE name={name} symbol={sym} quote={quotes.get(i)}')
           asyncio.run(main())
           PY
+      - name: Deriv live snapshot
+        env:
+          DERIV_SYMBOL: stpRNG
+        run: |
+          timeout 30s python -m CONNECTOR.deriv_live || test $? -eq 124
+          if [ -f DATA/live_analysis.json ]; then
+            echo '--- LIVE ANALYSIS SNAPSHOT ---'
+            cat DATA/live_analysis.json
+          else
+            echo 'LIVE_ANALYSIS_NOT_CREATED'
+          fi
