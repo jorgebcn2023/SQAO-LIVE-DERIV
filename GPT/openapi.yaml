@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: SQAO Live Deriv API
-  version: 1.1.0
-  description: Read-only market-data API for SQAO GPT. Provides live Deriv Step Index MTF data for reconciliation with uploaded charts.
+  version: 2.0.0
+  description: Read-only live Deriv Step Index market-data API for SQAO. The snapshot returns D1, H1, M15, M5 and M1 data plus conservative quantitative analysis. MODEL_ESTIMATE is not a historical win rate.
 servers:
   - url: https://sqao-live-api.onrender.com
 security:
@@ -23,31 +23,23 @@ paths:
   /market/active-symbols:
     get:
       operationId: getActiveStepSymbols
-      summary: List available Deriv Step Index symbols
+      summary: List active Deriv Step Index symbols
       responses:
         '200':
-          description: Step Index symbols
+          description: Active Step Index symbols
           content:
             application/json:
               schema:
                 type: object
-                properties:
-                  symbols:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        symbol: {type: string}
-                        display_name: {type: string}
   /market/ohlc:
     get:
       operationId: getStepOHLC
-      summary: Get recent OHLC candles for a Step Index timeframe
+      summary: Get recent live OHLC candles
       parameters:
         - name: symbol
           in: query
           required: false
-          schema: {type: string, default: stpRNG}
+          schema: {type: string, default: AUTO}
         - name: timeframe
           in: query
           required: false
@@ -58,10 +50,10 @@ paths:
         - name: count
           in: query
           required: false
-          schema: {type: integer, minimum: 10, maximum: 500, default: 120}
+          schema: {type: integer, minimum: 20, maximum: 500, default: 120}
       responses:
         '200':
-          description: OHLC candles
+          description: Live OHLC candles
           content:
             application/json:
               schema:
@@ -69,16 +61,20 @@ paths:
   /analysis/snapshot:
     get:
       operationId: getSQAOQuantSnapshot
-      summary: Get live read-only MTF quantitative snapshot for Step Index
-      description: Returns D1, H1, M15, M5 and M1 recent Deriv candles plus a direction proxy and latest close for each timeframe. The proxy is not a trading signal and is not a historical win rate.
+      summary: Get complete live SQAO MTF snapshot
+      description: Fetches an active Step Index automatically when symbol=AUTO, retrieves D1/H1/M15/M5/M1, computes EMA10/EMA20, RSI14, ATR14, 20-candle range, MTF alignment, conservative decision and 60-minute conditional scenarios.
       parameters:
         - name: symbol
           in: query
           required: false
-          schema: {type: string, default: stpRNG}
+          schema: {type: string, default: AUTO}
+        - name: count
+          in: query
+          required: false
+          schema: {type: integer, minimum: 20, maximum: 500, default: 120}
       responses:
         '200':
-          description: Live MTF snapshot
+          description: Live MTF quantitative snapshot
           content:
             application/json:
               schema:
