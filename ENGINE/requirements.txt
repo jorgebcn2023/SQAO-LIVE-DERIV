@@ -1,2 +1,4 @@
 websockets>=14,<16
 PyYAML>=6.0,<7
+openai>=1.0,<2
+streamlit>=1.40,<2
