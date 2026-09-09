@@ -10,7 +10,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -r ENGINE/requirements.txt
+      - run: python -m pip install -r ENGINE/requirements.txt -r API/requirements.txt
+      - run: python -m compileall -q API AI ENGINE CONNECTOR
       - run: python -m ENGINE.tests
       - run: python -m ENGINE.live_pipeline
       - name: Deriv public WebSocket smoke test
@@ -52,12 +53,17 @@ jobs:
           PY
       - name: Deriv live snapshot
         env:
-          DERIV_SYMBOL: stpRNG
+          DERIV_SYMBOL: AUTO
+          SQAO_HISTORY_CANDLES: '120'
         run: |
           timeout 30s python -m CONNECTOR.deriv_live || test $? -eq 124
-          if [ -f DATA/live_analysis.json ]; then
-            echo '--- LIVE ANALYSIS SNAPSHOT ---'
-            cat DATA/live_analysis.json
-          else
-            echo 'LIVE_ANALYSIS_NOT_CREATED'
-          fi
+          test -f DATA/live_analysis.json || { echo 'LIVE_ANALYSIS_NOT_CREATED'; exit 1; }
+          python - <<'PY'
+          import json
+          with open('DATA/live_analysis.json', encoding='utf-8') as f:
+              data=json.load(f)
+          required={'D1','H1','M15','M5','M1'}
+          if not required.issubset(set(data.get('timeframes', {}))):
+              raise SystemExit('Incomplete MTF snapshot')
+          print('LIVE_MTF_SNAPSHOT_OK')
+          PY
