@@ -1,26 +1,25 @@
-# GPT Vision layer
+# GPT Vision + Live Quant
 
-This module adds a multimodal analysis layer to SQAO-LIVE-DERIV.
+La interfaz combina los gráficos MTF subidos por el usuario con el snapshot cuantitativo LIVE de SQAO.
 
-## Configuration
-
-Set the OpenAI API key outside the repository:
+## Uso
 
 ```bash
-export OPENAI_API_KEY='...'
-export OPENAI_MODEL='gpt-5.6-luna'
-```
-
-Never commit the key.
-
-## Start the upload interface
-
-```bash
+source .venv/bin/activate
 streamlit run AI/app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
-Upload D1/H1/M15/M5/M1 screenshots. The app also reads `DATA/live_analysis.json` when available and gives GPT the quantitative snapshot together with the images.
+En la barra lateral puedes configurar:
 
-The result is displayed in the UI and saved as `DATA/gpt_analysis.md`.
+- URL del backend SQAO.
+- `SQAO_ACTION_KEY` si el backend está protegido.
+- OpenAI API key de sesión.
+- Modelo OpenAI.
+- Step Index (`AUTO` autodetecta el símbolo activo).
+- Número de velas por timeframe.
 
-GPT output is an analysis layer, not a guarantee of future market movement or profitability.
+Después sube D1/H1/M15/M5/M1 y pulsa **Analizar con SQAO + GPT**.
+
+La interfaz no guarda la OpenAI API key en GitHub. El resultado se guarda localmente en `DATA/gpt_analysis.md`.
+
+La capa GPT debe distinguir datos observados, inferencias y escenarios `MODEL_ESTIMATE`; nunca debe presentar una estimación como win rate histórico ni como garantía.
