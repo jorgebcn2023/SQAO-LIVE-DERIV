@@ -10,25 +10,24 @@ from typing import Iterable
 from openai import OpenAI
 
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6")
-TIMEFRAMES = ("D1", "H1", "M15", "M5", "M1")
 
 SYSTEM_PROMPT = """You are the visual analysis and reconciliation layer of SQAO-LIVE-DERIV.
 
 Analyze all uploaded Step Index charts jointly using the strict MTF hierarchy D1 > H1 > M15 > M5 > M1.
-The quantitative snapshot is supplied by the SQAO backend and must be treated as the live-data source when present.
+The quantitative snapshot is supplied by the SQAO backend and is the live-data source when present.
 
 Rules:
-- Detect the timeframe from the visible chart label first, then from the filename.
-- Never invent prices, indicators, levels, timestamps, volatility, ATR, spread, or other values.
+- Detect timeframe from the visible chart label first, then filename.
+- Never invent prices, indicators, levels, timestamps, volatility, ATR, spread, slippage, or other values.
 - Separate OBSERVED facts from INFERRED scenarios.
-- Check whether the five timeframes are temporally synchronized. If dates/times conflict, explicitly flag the conflict and reduce confidence.
-- Compare visual direction/structure against quantitative direction_proxy and latest_close for each timeframe.
-- A disagreement between quant and vision must be reported, not silently resolved.
-- Prefer WAIT when the MTF evidence is stale, contradictory, incomplete, or the move is materially extended.
-- Return only one final decision: LONG, SHORT, WAIT, or NO_TRADE.
-- Confidence/probabilities are MODEL_ESTIMATE only. Never present them as historical win rates unless valid backtest data is supplied.
-- Never claim certainty, guaranteed profitability, or a guaranteed next-hour move.
-- For the 60-minute horizon, give conditional scenarios and explicit invalidation conditions.
+- Check whether uploaded charts are synchronized. Flag missing, duplicated, stale, or contradictory timeframes.
+- Compare visual structure against quantitative direction, EMA, RSI, ATR and latest close when supplied.
+- Report quant/vision disagreement explicitly.
+- Prefer WAIT or NO_TRADE when evidence is incomplete, stale, contradictory, or materially extended.
+- Return exactly one final decision: LONG, SHORT, WAIT, or NO_TRADE.
+- Confidence and scenario percentages are MODEL_ESTIMATE only, never historical win rates unless valid backtest data is supplied.
+- Never claim certainty or guaranteed profitability.
+- For the 60-minute horizon, give conditional scenarios and invalidation conditions.
 
 Required sections:
 1. DATA_STATUS
@@ -69,9 +68,10 @@ def analyze_images(
     paths: Iterable[str | Path | tuple[str | Path, str]],
     market_snapshot: dict | None = None,
     model: str | None = None,
+    api_key: str | None = None,
 ) -> str:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
+    key = (api_key or os.getenv("OPENAI_API_KEY", "")).strip()
+    if not key:
         raise RuntimeError("OPENAI_API_KEY is not configured")
 
     image_items = _normalize_paths(paths)
@@ -81,8 +81,8 @@ def analyze_images(
         if not path.is_file():
             raise FileNotFoundError(path)
 
-    client = OpenAI(api_key=api_key)
-    snapshot_text = json.dumps(market_snapshot or {}, ensure_ascii=False, indent=2)[:40000]
+    client = OpenAI(api_key=key)
+    snapshot_text = json.dumps(market_snapshot or {}, ensure_ascii=False, indent=2)[:50000]
     image_manifest = "\n".join(f"- {label}" for _, label in image_items)
     content = [{
         "type": "input_text",
