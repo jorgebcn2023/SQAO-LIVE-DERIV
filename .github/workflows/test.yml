@@ -13,3 +13,27 @@ jobs:
       - run: python -m pip install -r ENGINE/requirements.txt
       - run: python -m ENGINE.tests
       - run: python -m ENGINE.live_pipeline
+      - name: Deriv public WebSocket smoke test
+        run: |
+          python - <<'PY'
+          import asyncio, json
+          import websockets
+          URL='wss://api.derivws.com/trading/v1/options/ws/public'
+          async def main():
+              async with websockets.connect(URL, open_timeout=15, close_timeout=5) as ws:
+                  await ws.send(json.dumps({'active_symbols':'brief','req_id':1001}))
+                  msg=json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
+                  if msg.get('error'):
+                      raise RuntimeError(msg['error'])
+                  symbols=msg.get('active_symbols', [])
+                  steps=[]
+                  for x in symbols:
+                      name=str(x.get('underlying_symbol_name',x.get('display_name','')))
+                      sym=str(x.get('underlying_symbol',x.get('symbol','')))
+                      if 'step index' in f'{name} {sym}'.lower():
+                          steps.append((name,sym))
+                  if not steps:
+                      raise RuntimeError('No Step Index symbol returned by Deriv')
+                  print('DERIV_PUBLIC_WS_OK', steps[:10])
+          asyncio.run(main())
+          PY
