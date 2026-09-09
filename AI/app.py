@@ -1,25 +1,30 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import streamlit as st
 
 from AI.gpt_vision import analyze_images
 
+ROOT = Path(__file__).resolve().parents[1]
+DATA = ROOT / "DATA"
+UPLOADS = DATA / "uploads"
+
 st.set_page_config(page_title="SQAO GPT Vision", layout="wide")
-st.title("SQAO — GPT Vision")
+st.title("SQAO-LIVE-DERIV · GPT Vision")
 st.caption("Sube D1/H1/M15/M5/M1. GPT analiza las imágenes junto con el snapshot cuantitativo de SQAO.")
 
 uploaded = st.file_uploader(
-    "Gráficos",
+    "Gráficos MTF",
     type=["png", "jpg", "jpeg", "webp"],
     accept_multiple_files=True,
     help="Idealmente sube D1, H1, M15, M5 y M1. No es obligatorio subir los cinco.",
 )
 
-snapshot_path = Path("DATA/live_analysis.json")
-snapshot = {}
+snapshot_path = DATA / "live_analysis.json"
+snapshot: dict = {}
 if snapshot_path.exists():
     try:
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
@@ -31,20 +36,28 @@ else:
 
 if uploaded:
     st.write(f"{len(uploaded)} gráfico(s) recibido(s).")
+    UPLOADS.mkdir(parents=True, exist_ok=True)
     cols = st.columns(min(len(uploaded), 5))
-    temp_paths = []
+    temp_paths: list[Path] = []
     for i, item in enumerate(uploaded):
-        target = Path("DATA") / f"upload_{i}_{item.name}"
-        target.parent.mkdir(parents=True, exist_ok=True)
+        target = UPLOADS / f"upload_{i}_{item.name}"
         target.write_bytes(item.getbuffer())
         temp_paths.append(target)
         with cols[i % len(cols)]:
             st.image(item, caption=item.name, use_container_width=True)
 
+    st.caption("Consejo: incluye el timeframe en el nombre del archivo o que sea visible en el gráfico.")
+
     if st.button("Analizar con GPT", type="primary"):
-        with st.spinner("Analizando gráficos + datos SQAO..."):
-            result = analyze_images(temp_paths, snapshot)
-        st.subheader("Análisis GPT")
-        st.markdown(result)
-        Path("DATA/gpt_analysis.md").write_text(result, encoding="utf-8")
-        st.download_button("Descargar análisis", result, file_name="gpt_analysis.md")
+        if not os.getenv("OPENAI_API_KEY"):
+            st.error("Falta OPENAI_API_KEY en el entorno del Codespace.")
+        else:
+            with st.spinner("Analizando gráficos + datos SQAO..."):
+                try:
+                    result = analyze_images(temp_paths, snapshot)
+                    (DATA / "gpt_analysis.md").write_text(result, encoding="utf-8")
+                    st.subheader("Análisis GPT")
+                    st.markdown(result)
+                    st.download_button("Descargar análisis", result, file_name="gpt_analysis.md")
+                except Exception as exc:
+                    st.error(f"Error de análisis: {exc}")
