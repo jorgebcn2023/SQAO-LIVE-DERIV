@@ -4,38 +4,21 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-echo "== SQAO LIVE DERIV :: Codespace bootstrap =="
-echo "ROOT=$ROOT"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 if [ ! -d .venv ]; then
-  python3 -m venv .venv
+  "$PYTHON_BIN" -m venv .venv
 fi
 source .venv/bin/activate
-python -m pip install --upgrade pip
+python -m pip install --upgrade pip >/dev/null
 python -m pip install -r ENGINE/requirements.txt
 
-echo
-printf '%s\n' '== Python =='
-python --version
-printf '%s\n' '== Package smoke test =='
+python -m compileall -q ENGINE CONNECTOR
 python -m ENGINE.tests
+python -m ENGINE.live_pipeline >/tmp/sqao-live-pipeline.json
 
-echo
-printf '%s\n' '== Pipeline smoke test =='
-set +e
-python -m ENGINE.live_pipeline
-PIPE_RC=$?
-set -e
-
-if [ "$PIPE_RC" -ne 0 ]; then
-  echo "Pipeline exited with code $PIPE_RC. This can be expected before DATA/ is populated."
-fi
-
-echo
-echo "SETUP_OK"
-echo
-echo "Next step:"
-echo "  source .venv/bin/activate"
-echo "  python -m CONNECTOR.deriv_live"
-echo
-echo "The connector uses public Deriv market data and does not require an API token."
+printf '\nSQAO-LIVE-DERIV: OK\n'
+printf '%s\n' 'Repositorio preparado para datos publicos de Deriv.'
+printf '%s\n' 'No se requiere token para el canal de mercado publico.'
+printf '%s\n' 'Iniciar: source .venv/bin/activate && python -m CONNECTOR.deriv_live'
+printf '%s\n' 'Analisis vivo: DATA/live_analysis.json'
