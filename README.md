@@ -2,50 +2,61 @@
 
 Sistema de análisis **read-only** para Step Index con datos de mercado de Deriv.
 
-## Flujo
+## Qué hace
 
-`Deriv active_symbols -> histórico M1/M5/M15/H1/D1 -> ticks en vivo -> OHLC -> motor predictivo SQAO`
+`Deriv active_symbols -> histórico M1/M5/M15/H1/D1 -> ticks en vivo -> OHLC -> análisis SQAO -> DATA/live_analysis.json`
 
-El conector usa el WebSocket público de Deriv por defecto, por lo que **no necesita API Token para datos de mercado**. La API pública expone `active_symbols`, `ticks` y `ticks_history` sin autenticación. citehttps://developers.deriv.com/docs/options/ws-public/
+El conector usa el WebSocket público actual de Deriv. Para datos públicos de mercado **no hace falta API Token**.
 
-## Ejecutar en Codespaces
+## Codespaces
+
+El repositorio incluye configuración de Dev Container. Al crear/reconstruir un Codespace se ejecuta automáticamente `RUN-CODESPACE.sh`, que:
+
+1. crea `.venv`;
+2. instala dependencias;
+3. compila `ENGINE` y `CONNECTOR` para detectar errores de sintaxis;
+4. ejecuta las pruebas;
+5. valida el pipeline.
+
+Si el Codespace ya existía, ejecutar una vez:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r ENGINE/requirements.txt
-python -m ENGINE.tests
+bash RUN-CODESPACE.sh
 ```
 
-Después, en una terminal:
+## Arranque en vivo
 
 ```bash
+source .venv/bin/activate
 python -m CONNECTOR.deriv_live
 ```
 
-Y en otra:
+El conector:
 
-```bash
-python -m ENGINE.live_pipeline
-```
+- autodetecta el Step Index;
+- descarga 500 velas por defecto en M1/M5/M15/H1/D1;
+- mantiene ticks en `DATA/ticks.ndjson`;
+- construye OHLC en vivo;
+- se reconecta automáticamente si se corta el WebSocket;
+- actualiza `DATA/live_analysis.json` al completar cada vela M1.
 
 ## Configuración
 
-Por defecto:
+Variables disponibles:
 
 ```text
 DERIV_SYMBOL=AUTO
-DERIV_AUTH_MODE=public
+DERIV_STEP_NAME=
 SQAO_HISTORY_CANDLES=500
 SQAO_DATA_DIR=DATA
 ```
 
-Para varios Step Index, se puede establecer `DERIV_STEP_NAME` para seleccionar por nombre.
+Si existen varios Step Index y se quiere seleccionar uno concreto, usar `DERIV_STEP_NAME`.
 
 ## Seguridad
 
-Esta versión no implementa `proposal`, `buy`, `sell` ni ninguna operación de trading. No guardar el PAT/API Token en el repositorio. Si en el futuro se usa autenticación, utilizar variables de entorno o Codespaces Secrets.
+Esta versión es exclusivamente de lectura. No implementa `proposal`, `buy`, `sell` ni otras operaciones de trading. No guardar PAT/API Tokens en el repositorio público. Para autenticación futura, usar variables de entorno o Codespaces Secrets.
 
-## Validación
+## Estado del análisis
 
-Las puntuaciones del motor son `MODEL_ESTIMATE` hasta disponer de un backtest válido. Nunca se presentan como win rate histórico.
+Las puntuaciones del motor son `MODEL_ESTIMATE` hasta disponer de un backtest válido. No se presentan como win rate histórico.
