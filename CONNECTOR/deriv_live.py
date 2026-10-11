@@ -201,15 +201,19 @@ async def run():
                     with (output / "ticks.ndjson").open("a", encoding="utf-8") as f:
                         f.write(json.dumps({"timestamp": epoch, "price": price, "symbol": symbol}) + "\n")
 
-                    for candle in aggregator.update(epoch, price):
+                    emitted = aggregator.update(epoch, price)
+                    for candle in emitted:
                         path = output / f"ohlc_{candle.timeframe}.csv"
                         with path.open("a", encoding="utf-8") as f:
                             f.write(
                                 f"{candle.timestamp},{candle.open},{candle.high},"
                                 f"{candle.low},{candle.close},{candle.timeframe}\n"
                             )
-                        if candle.timeframe == "M1":
-                            run_analysis(output)
+                    # Persist every timeframe that closed on this tick before
+                    # reading the files for analysis (M5/M15/H1/D1 can close
+                    # on the same tick as M1).
+                    if any(candle.timeframe == "M1" for candle in emitted):
+                        run_analysis(output)
 
                     print(
                         datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat(),
