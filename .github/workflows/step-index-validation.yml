@@ -31,6 +31,7 @@ jobs:
           SQAO_STEP_RR: "1.0"
           SQAO_STEP_ATR_MULT: "1.2"
           SQAO_STEP_HORIZON: "5"
+          # Deliberately omit SQAO_STEP_COST_R until a defensible round-trip cost is measured.
         run: python -m ENGINE.step_index_validation
       - name: Upload report
         if: always()
