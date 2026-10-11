@@ -1,6 +1,7 @@
 from .quant import atr, win_rate, profit_factor
 from .predictive import build_hour_scenarios
 from .live_pipeline import analyze_rows, direction, ema, rsi
+from CONNECTOR.deriv_live import CandleAggregator
 
 assert atr([2, 3, 4, 5], [1, 2, 3, 4], [1.5, 2.5, 3.5, 4.5], period=2) is not None
 assert round(win_rate([1, -1, 1]), 6) == round(2 / 3, 6)
@@ -21,4 +22,16 @@ result = analyze_rows(frames)
 assert result["data_complete"] is True
 assert result["decision"] in {"LONG", "SHORT", "WAIT", "NO_TRADE"}
 assert set(result["timeframes"]) == {"D1", "H1", "M15", "M5", "M1"}
+
+# The live connector must keep all five SQAO timeframes current.
+agg = CandleAggregator()
+base = 1_700_000_000
+assert agg.update(base, 100.0) == []
+hour_boundary = ((base // 3600) + 1) * 3600
+emitted = agg.update(hour_boundary, 101.0)
+assert "H1" in {c.timeframe for c in emitted}
+day_boundary = ((base // 86400) + 1) * 86400
+emitted = agg.update(day_boundary, 102.0)
+assert "D1" in {c.timeframe for c in emitted}
+assert set(CandleAggregator().timeframes) == {1, 5, 15, 60, 1440}
 print("SQAO tests: OK")
