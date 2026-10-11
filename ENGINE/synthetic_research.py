@@ -87,7 +87,7 @@ async def req(ws,payload):
 
 async def active_symbols():
     async with websockets.connect(PUBLIC_WS,ping_interval=20,ping_timeout=20,open_timeout=15) as ws:
-        m=await req(ws,{'active_symbols':'brief','product_type':'basic','req_id':1})
+        m=await req(ws,{'active_symbols':'brief','req_id':1})
     out=[]
     for x in m.get('active_symbols',[]):
         sym=str(x.get('symbol',x.get('underlying_symbol','')));name=str(x.get('display_name',x.get('underlying_symbol_name','')))
