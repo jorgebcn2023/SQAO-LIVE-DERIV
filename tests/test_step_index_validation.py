@@ -17,7 +17,14 @@ class ValidationMetricsTests(unittest.TestCase):
         self.assertLessEqual(low,0.70)
         self.assertGreaterEqual(high,0.70)
 
-    def test_trend_ignores_higher_timeframe_candle_not_yet_closed(self):\n        rows=[{"epoch":i*900,"close":100+i,"high":101+i,"low":99+i} for i in range(30)]\n        # At the open time of the final candle, only 29 bars are closed/known.\n        self.assertIsNone(trend_at(rows, rows[-1]["epoch"], 900))\n        # One full timeframe later, all 30 bars are eligible.\n        self.assertEqual(trend_at(rows, rows[-1]["epoch"]+900, 900), "LONG")\n\n    def test_summary_reports_win_rate_and_drawdown(self):
+    def test_trend_ignores_higher_timeframe_candle_not_yet_closed(self):
+        rows=[{"epoch":i*900,"close":100+i,"high":101+i,"low":99+i} for i in range(30)]
+        # At the open time of the final candle, only 29 bars are closed/known.
+        self.assertIsNone(trend_at(rows, rows[-1]["epoch"], 900))
+        # One full timeframe later, all 30 bars are eligible.
+        self.assertEqual(trend_at(rows, rows[-1]["epoch"]+900, 900), "LONG")
+
+    def test_summary_reports_win_rate_and_drawdown(self):
         m=summarize([1.0,-1.0,1.0])
         self.assertEqual(m["trades"],3)
         self.assertAlmostEqual(m["win_rate"],2/3)
