@@ -1,6 +1,6 @@
 from __future__ import annotations
 """Step Index-only MTF walk-forward backtest. Research only; never places trades."""
-import asyncio, json, math, os, urllib.request
+import asyncio, json, math, os
 from datetime import datetime, timezone
 from pathlib import Path
 
