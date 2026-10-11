@@ -1,8 +1,8 @@
 """READ-ONLY Deriv market-data connector for SQAO.
 
-Connects to Deriv's current public WebSocket, autodetects a Step Index,
-seeds M1/M5/M15/H1/D1 history, streams ticks, builds live candles and
-writes a fresh analysis snapshot after each completed M1 candle.
+Autodetects a Step Index, seeds completed M1/M5/M15/H1/D1 candles,
+streams ticks, maintains all five live timeframes, and writes a fresh
+analysis snapshot after each completed M1 candle.
 
 No trading/account calls are present.
 """
@@ -18,6 +18,7 @@ from pathlib import Path
 import websockets
 
 PUBLIC_WS = "wss://api.derivws.com/trading/v1/options/ws/public"
+TIMEFRAME_LABELS = {1: "M1", 5: "M5", 15: "M15", 60: "H1", 1440: "D1"}
 
 
 @dataclass
@@ -34,7 +35,12 @@ class Candle:
 
 
 class CandleAggregator:
-    def __init__(self, timeframes=(1, 5, 15)):
+    """Build completed OHLC candles for every timeframe consumed by SQAO."""
+
+    def __init__(self, timeframes=(1, 5, 15, 60, 1440)):
+        unknown = set(timeframes) - set(TIMEFRAME_LABELS)
+        if unknown:
+            raise ValueError(f"Unsupported candle timeframes: {sorted(unknown)}")
         self.timeframes = tuple(timeframes)
         self.current: dict[int, Candle] = {}
 
@@ -51,7 +57,7 @@ class CandleAggregator:
             if candle is None or candle.timestamp != start:
                 if candle is not None:
                     emitted.append(candle)
-                candle = Candle(start, price, price, price, price, f"M{tf}")
+                candle = Candle(start, price, price, price, price, TIMEFRAME_LABELS[tf])
                 self.current[tf] = candle
             else:
                 candle.high = max(candle.high, price)
@@ -93,6 +99,7 @@ async def autodetect_symbol(ws):
 
 
 async def seed_history(ws, symbol: str, output: Path, count: int = 500):
+    now = int(datetime.now(timezone.utc).timestamp())
     for tf, granularity, label in (
         (1, 60, "M1"),
         (5, 300, "M5"),
@@ -118,14 +125,23 @@ async def seed_history(ws, symbol: str, output: Path, count: int = 500):
             raise RuntimeError(f"No historical candles returned for {label} / {symbol}")
 
         path = output / f"ohlc_{label}.csv"
+        written = 0
         with path.open("w", encoding="utf-8") as f:
             f.write("timestamp,open,high,low,close,timeframe\n")
             for c in candles:
+                epoch = int(c["epoch"])
+                # Do not seed an in-progress candle and then append a duplicate
+                # when the live aggregator closes that same time bucket.
+                if epoch + granularity > now:
+                    continue
                 f.write(
-                    f"{int(c['epoch'])},{float(c['open'])},{float(c['high'])},"
+                    f"{epoch},{float(c['open'])},{float(c['high'])},"
                     f"{float(c['low'])},{float(c['close'])},{label}\n"
                 )
-    print(f"HISTORY_SEEDED symbol={symbol} count={count}", flush=True)
+                written += 1
+        if written == 0:
+            raise RuntimeError(f"No completed historical candles returned for {label} / {symbol}")
+    print(f"HISTORY_SEEDED symbol={symbol} count={count} completed_only=true", flush=True)
 
 
 def run_analysis(output: Path):
@@ -140,7 +156,8 @@ def run_analysis(output: Path):
             json.dump(result, f, ensure_ascii=False, indent=2)
         tmp.replace(target)
         decision = result.get("decision", "WAIT")
-        print(f"ANALYSIS_UPDATED decision={decision}", flush=True)
+        age = result.get("latest_data_age_seconds")
+        print(f"ANALYSIS_UPDATED decision={decision} data_age_seconds={age}", flush=True)
     except Exception as exc:
         print(f"ANALYSIS_ERROR: {exc}", flush=True)
 
@@ -151,10 +168,12 @@ async def run():
     output.mkdir(parents=True, exist_ok=True)
     history_count = int(os.getenv("SQAO_HISTORY_CANDLES", "500"))
     delay = 1
-    aggregator = CandleAggregator()
 
     while True:
         try:
+            # Reset the aggregator after reconnect so candles from a previous
+            # socket session cannot be emitted into the new session.
+            aggregator = CandleAggregator()
             async with websockets.connect(PUBLIC_WS, ping_interval=20, ping_timeout=20) as ws:
                 if symbol.upper() == "AUTO":
                     symbol = await autodetect_symbol(ws)
@@ -184,10 +203,7 @@ async def run():
 
                     for candle in aggregator.update(epoch, price):
                         path = output / f"ohlc_{candle.timeframe}.csv"
-                        new = not path.exists()
                         with path.open("a", encoding="utf-8") as f:
-                            if new:
-                                f.write("timestamp,open,high,low,close,timeframe\n")
                             f.write(
                                 f"{candle.timestamp},{candle.open},{candle.high},"
                                 f"{candle.low},{candle.close},{candle.timeframe}\n"
