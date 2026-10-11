@@ -21,6 +21,8 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: python -m pip install --upgrade pip websockets
+      - name: Run Step Index unit tests
+        run: python -m unittest tests.test_step_index_validation -v
       - name: Run Step Index historical validation
         env:
           SQAO_STEP_CANDLES: ${{ github.event.inputs.candles || '5000' }}
