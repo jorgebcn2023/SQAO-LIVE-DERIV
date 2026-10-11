@@ -10,7 +10,10 @@ MIN_TRADES = int(os.getenv("SQAO_STEP_MIN_TRADES", "100"))
 TARGET_WIN_RATE = float(os.getenv("SQAO_STEP_TARGET_WIN_RATE", "0.70"))
 RR = float(os.getenv("SQAO_STEP_RR", "1.0"))
 ATR_MULT = float(os.getenv("SQAO_STEP_ATR_MULT", "1.2"))
-HORIZON = int(os.getenv("SQAO_STEP_HORIZON", "5"))\n# Net validation is disabled until the user supplies an empirically grounded round-trip cost in R.\nCOST_R_TEXT = os.getenv("SQAO_STEP_COST_R", "").strip()\nCOST_R = float(COST_R_TEXT) if COST_R_TEXT else None
+HORIZON = int(os.getenv("SQAO_STEP_HORIZON", "5"))
+# Net validation is disabled until the user supplies an empirically grounded round-trip cost in R.
+COST_R_TEXT = os.getenv("SQAO_STEP_COST_R", "").strip()
+COST_R = float(COST_R_TEXT) if COST_R_TEXT else None
 OUT = Path(os.getenv("SQAO_STEP_OUT", "DATA/step_index_validation.json"))
 
 def ema(xs, p):
@@ -96,7 +99,8 @@ def backtest(m1,m5,m15,h1):
         if len(prev)<20:continue
         direction="LONG" if closes[-1]>max(prev) and e10>e20 else "SHORT" if closes[-1]<min(prev) and e10<e20 else None
         if not direction:continue
-        decision_epoch=t+300  # M5 signal candle has just closed at this instant.\n        if trend_at(m15,decision_epoch,900)!=direction or trend_at(h1,decision_epoch,3600)!=direction:continue
+        decision_epoch=t+300  # M5 signal candle has just closed at this instant.
+        if trend_at(m15,decision_epoch,900)!=direction or trend_at(h1,decision_epoch,3600)!=direction:continue
         # RSI on M1 is a timing guard, using only candles closed by signal time.
         m1hist=[x for x in m1 if int(x["epoch"])+60<=decision_epoch]
         c1=[float(x["close"]) for x in m1hist]
