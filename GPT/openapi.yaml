@@ -1,25 +1,33 @@
 openapi: 3.1.0
 info:
   title: SQAO Live Deriv API
-  version: 2.0.0
-  description: Read-only live Deriv Step Index market-data API for SQAO. The snapshot returns D1, H1, M15, M5 and M1 data plus conservative quantitative analysis. MODEL_ESTIMATE is not a historical win rate.
+  version: 2.1.0
+  description: >-
+    Read-only live Deriv Step Index market-data API. The snapshot returns D1,
+    H1, M15, M5 and M1 candles and quantitative indicators. Scenario estimates
+    are not historical win rates or guarantees. No trading operations are exposed.
 servers:
   - url: https://sqao-live-api.onrender.com
-security:
-  - SQAOKey: []
 paths:
   /health:
     get:
       operationId: health
-      summary: Check SQAO API health
+      summary: Check API and background connector health
       security: []
       responses:
         '200':
-          description: API is healthy
+          description: API status and connector state
           content:
             application/json:
               schema:
                 type: object
+                properties:
+                  status: {type: string}
+                  service: {type: string}
+                  version: {type: string}
+                  read_only: {type: boolean}
+                  background_connector_enabled: {type: boolean}
+                  background_connector_running: {type: boolean}
   /market/active-symbols:
     get:
       operationId: getActiveStepSymbols
@@ -34,7 +42,7 @@ paths:
   /market/ohlc:
     get:
       operationId: getStepOHLC
-      summary: Get recent live OHLC candles
+      summary: Get recent OHLC candles from Deriv
       parameters:
         - name: symbol
           in: query
@@ -53,7 +61,7 @@ paths:
           schema: {type: integer, minimum: 20, maximum: 500, default: 120}
       responses:
         '200':
-          description: Live OHLC candles
+          description: OHLC candles
           content:
             application/json:
               schema:
@@ -61,8 +69,11 @@ paths:
   /analysis/snapshot:
     get:
       operationId: getSQAOQuantSnapshot
-      summary: Get complete live SQAO MTF snapshot
-      description: Fetches an active Step Index automatically when symbol=AUTO, retrieves D1/H1/M15/M5/M1, computes EMA10/EMA20, RSI14, ATR14, 20-candle range, MTF alignment, conservative decision and 60-minute conditional scenarios.
+      summary: Get complete live multi-timeframe analysis
+      description: >-
+        Resolves symbol=AUTO against active Step Index symbols, retrieves
+        D1/H1/M15/M5/M1 candles and computes the quantitative snapshot.
+        Treat decisions and scenario probabilities as estimates, not guarantees.
       parameters:
         - name: symbol
           in: query
@@ -79,9 +90,3 @@ paths:
             application/json:
               schema:
                 type: object
-components:
-  securitySchemes:
-    SQAOKey:
-      type: apiKey
-      in: header
-      name: X-SQAO-Key
