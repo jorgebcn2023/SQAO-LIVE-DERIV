@@ -19,36 +19,38 @@ jobs:
           python - <<'PY'
           import asyncio, json
           import websockets
-          URL='wss://api.derivws.com/trading/v1/options/ws/public'
+
+          URL = 'wss://api.derivws.com/trading/v1/options/ws/public'
+
           async def main():
               async with websockets.connect(URL, open_timeout=15, close_timeout=5) as ws:
-                  await ws.send(json.dumps({'active_symbols':'brief','req_id':1001}))
-                  msg=json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
-                  if msg.get('error'):
-                      raise RuntimeError(msg['error'])
-                  symbols=msg.get('active_symbols', [])
-                  steps=[]
-                  for x in symbols:
-                      name=str(x.get('underlying_symbol_name',x.get('display_name','')))
-                      sym=str(x.get('underlying_symbol',x.get('symbol','')))
-                      if 'step index' in f'{name} {sym}'.lower():
-                          steps.append((name,sym))
+                  await ws.send(json.dumps({'active_symbols': 'brief', 'req_id': 1001}))
+                  while True:
+                      msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
+                      if msg.get('error'):
+                          raise RuntimeError(msg['error'])
+                      if msg.get('req_id') == 1001 or msg.get('msg_type') == 'active_symbols':
+                          break
+
+                  steps = []
+                  for item in msg.get('active_symbols', []):
+                      name = str(item.get('underlying_symbol_name', item.get('display_name', '')))
+                      symbol = str(item.get('underlying_symbol', item.get('symbol', '')))
+                      if symbol and 'step index' in f'{name} {symbol}'.lower():
+                          steps.append((name, symbol))
                   if not steps:
                       raise RuntimeError('No Step Index symbol returned by Deriv')
-                  print('DERIV_PUBLIC_WS_OK', steps[:10])
-                  for i,(name,sym) in enumerate(steps[:10], start=2000):
-                      await ws.send(json.dumps({'ticks':sym,'subscribe':0,'req_id':i}))
-                  quotes={}
-                  for _ in range(len(steps[:10])):
-                      tick=json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
+
+                  name, symbol = steps[0]
+                  await ws.send(json.dumps({'ticks': symbol, 'subscribe': 1, 'req_id': 2000}))
+                  while True:
+                      tick = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
                       if tick.get('error'):
                           raise RuntimeError(tick['error'])
-                      req=tick.get('req_id')
-                      q=tick.get('tick',{}).get('quote')
-                      if req is not None and q is not None:
-                          quotes[req]=q
-                  for i,(name,sym) in enumerate(steps[:10], start=2000):
-                      print(f'STEP_INDEX_QUOTE name={name} symbol={sym} quote={quotes.get(i)}')
+                      if tick.get('req_id') == 2000 and tick.get('tick', {}).get('quote') is not None:
+                          print(f'DERIV_PUBLIC_WS_OK name={name} symbol={symbol} quote={tick["tick"]["quote"]}')
+                          break
+
           asyncio.run(main())
           PY
       - name: Deriv live snapshot
