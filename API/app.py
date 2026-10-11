@@ -44,7 +44,7 @@ async def _deriv_request(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _active_step_symbols() -> list[dict[str, str]]:
-    data = await _deriv_request({"active_symbols": "brief", "product_type": "basic", "req_id": 9001})
+    data = await _deriv_request({"active_symbols": "brief", "req_id": 9001})
     symbols: list[dict[str, str]] = []
     for item in data.get("active_symbols", []):
         name = str(item.get("display_name", item.get("underlying_symbol_name", "")))
@@ -78,7 +78,7 @@ async def _candles(symbol: str, timeframe: str, count: int) -> list[dict[str, An
         "start": 1,
         "style": "candles",
         "granularity": GRANULARITY[timeframe],
-        "subscribe": 0,
+        "subscribe": 1,
         "req_id": 10000 + GRANULARITY[timeframe],
     })
     return data.get("candles", [])
