@@ -10,7 +10,7 @@ MIN_TRADES = int(os.getenv("SQAO_STEP_MIN_TRADES", "100"))
 TARGET_WIN_RATE = float(os.getenv("SQAO_STEP_TARGET_WIN_RATE", "0.70"))
 RR = float(os.getenv("SQAO_STEP_RR", "1.0"))
 ATR_MULT = float(os.getenv("SQAO_STEP_ATR_MULT", "1.2"))
-HORIZON = int(os.getenv("SQAO_STEP_HORIZON", "5"))
+HORIZON = int(os.getenv("SQAO_STEP_HORIZON", "5"))\n# Net validation is disabled until the user supplies an empirically grounded round-trip cost in R.\nCOST_R_TEXT = os.getenv("SQAO_STEP_COST_R", "").strip()\nCOST_R = float(COST_R_TEXT) if COST_R_TEXT else None
 OUT = Path(os.getenv("SQAO_STEP_OUT", "DATA/step_index_validation.json"))
 
 def ema(xs, p):
@@ -159,7 +159,7 @@ async def main():
     rs=[p[0] for p in pairs];trades=[p[1] for p in pairs]
     m=summarize(rs)
     passed=(m["trades"]>=MIN_TRADES and m["win_rate"] is not None and m["win_rate"]>=TARGET_WIN_RATE and m["win_rate_wilson_95_low"]>=TARGET_WIN_RATE and isinstance(m["profit_factor"],(int,float)) and m["profit_factor"]>1 and (m["expectancy_R"] or -1)>0)
-    report={"generated_utc":datetime.now(timezone.utc).isoformat(),"symbol":symbol,"strategy":"M5 EMA10/20 + 20-close breakout; M15/H1 EMA trend confirmation; M1 RSI guard","timeframes":{"M1":len(m1),"M5":len(m5),"M15":len(m15),"H1":len(h1)},"holdout_start_utc":datetime.fromtimestamp(cutoff,timezone.utc).isoformat(),"parameters":{"target_win_rate":TARGET_WIN_RATE,"min_trades":MIN_TRADES,"rr":RR,"atr_multiplier":ATR_MULT,"horizon_M5_candles":HORIZON,"costs":"NOT MODELED; results are gross and cannot validate live profitability", "candle_timestamp_policy":"Higher-timeframe and M1 filters only use candles fully closed by the M5 signal close"},"metrics":m,"decision":"CANDIDATE_FOR_DEMO_ONLY" if passed else "NO_TRADE","trades":trades}
+    report={"generated_utc":datetime.now(timezone.utc).isoformat(),"symbol":symbol,"strategy":"M5 EMA10/20 + 20-close breakout; M15/H1 EMA trend confirmation; M1 RSI guard","timeframes":{"M1":len(m1),"M5":len(m5),"M15":len(m15),"H1":len(h1)},"holdout_start_utc":datetime.fromtimestamp(cutoff,timezone.utc).isoformat(),"parameters":{"target_win_rate":TARGET_WIN_RATE,"min_trades":MIN_TRADES,"rr":RR,"atr_multiplier":ATR_MULT,"horizon_M5_candles":HORIZON,"round_trip_cost_R":COST_R,"costs_status":"NET COST ADJUSTMENT APPLIED" if COST_R is not None else "NOT MODELED: set SQAO_STEP_COST_R to an evidence-based round-trip cost expressed in R","candle_timestamp_policy":"Higher-timeframe and M1 filters only use candles fully closed by the M5 signal close"},"metrics":{"gross":gross_metrics,"net":m if net_rs is not None else None},"decision":"CANDIDATE_FOR_DEMO_ONLY" if passed else ("NO_TRADE_COSTS_UNCONFIGURED" if COST_R is None else "NO_TRADE"),"trades":trades}
     OUT.parent.mkdir(parents=True,exist_ok=True);OUT.write_text(json.dumps(report,indent=2),encoding="utf-8")
     print(json.dumps({k:v for k,v in report.items() if k!="trades"},indent=2))
     print("Trade log:",OUT)
