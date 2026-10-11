@@ -53,15 +53,33 @@ async def get_candles(symbol, granularity, count):
     rows=m.get("candles",[])
     return sorted((r for r in rows if all(k in r for k in ("epoch","open","high","low","close"))),key=lambda r:int(r["epoch"]))
 
+def parse_step_symbols(payload):
+    """Normalize both legacy WebSocket and newer Deriv public API symbol schemas."""
+    matches=[]
+    for x in payload.get("active_symbols",[]) or []:
+        # The current public endpoint may expose underlying_symbol(_name), while
+        # the legacy endpoint uses symbol/display_name.
+        name=str(x.get("display_name") or x.get("underlying_symbol_name") or x.get("underlying_symbol") or "")
+        sym=str(x.get("symbol") or x.get("underlying_symbol") or "")
+        searchable=f"{name} {sym}".lower()
+        if sym and "step index" in searchable:
+            matches.append({"symbol":sym,"name":name})
+    # Deduplicate while preserving API order.
+    unique=[]; seen=set()
+    for item in matches:
+        if item["symbol"] not in seen:
+            seen.add(item["symbol"]); unique.append(item)
+    return unique
+
 async def find_step_symbol():
     import websockets
     async with websockets.connect(WS,ping_interval=20,ping_timeout=20,open_timeout=20) as ws:
         m=await request(ws,{"active_symbols":"brief","req_id":1})
-    matches=[]
-    for x in m.get("active_symbols",[]):
-        name=str(x.get("display_name","")); sym=str(x.get("symbol",""))
-        if "step index" in name.lower() or "step index" in sym.lower(): matches.append({"symbol":sym,"name":name})
-    if not matches: raise RuntimeError("No se encontró Step Index en active_symbols; no se ejecuta un sustituto.")
+    matches=parse_step_symbols(m)
+    if not matches:
+        # Include useful response diagnostics, without dumping unrelated account data.
+        keys=sorted(m.keys())
+        raise RuntimeError(f"No se encontró Step Index en active_symbols. Respuesta recibida con claves: {keys}; no se ejecuta un sustituto.")
     # Prefer the exact display name, never silently substitute another synthetic.
     exact=[x for x in matches if x["name"].strip().lower()=="step index"]
     return (exact or matches)[0]
