@@ -4,6 +4,8 @@ import asyncio
 import json
 import os
 from contextlib import suppress
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import websockets
@@ -16,9 +18,11 @@ API_KEY = os.getenv("SQAO_ACTION_KEY", "").strip()
 TIMEFRAMES = ("D1", "H1", "M15", "M5", "M1")
 GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "D1": 86400}
 RUN_CONNECTOR = os.getenv("SQAO_RUN_CONNECTOR", "true").strip().lower() in {"1", "true", "yes", "on"}
+DATA_DIR = Path(os.getenv("SQAO_DATA_DIR", "DATA"))
 
-app = FastAPI(title="SQAO Live API", version="2.1.0", docs_url="/docs", redoc_url="/redoc")
+app = FastAPI(title="SQAO Live API", version="2.2.0", docs_url="/docs", redoc_url="/redoc")
 _connector_task: asyncio.Task | None = None
+_connector_started_at: str | None = None
 
 
 async def _run_connector_background() -> None:
@@ -30,8 +34,9 @@ async def _run_connector_background() -> None:
 
 @app.on_event("startup")
 async def start_background_connector() -> None:
-    global _connector_task
+    global _connector_task, _connector_started_at
     if RUN_CONNECTOR and _connector_task is None:
+        _connector_started_at = datetime.now(timezone.utc).isoformat()
         _connector_task = asyncio.create_task(_run_connector_background(), name="sqao-deriv-live-connector")
 
 
@@ -52,6 +57,74 @@ def _auth_ok(key: str | None) -> bool:
 def _check_auth(key: str | None) -> None:
     if not _auth_ok(key):
         raise HTTPException(status_code=401, detail="Invalid SQAO API key")
+
+
+def _latest_data_status() -> dict[str, Any]:
+    """Read only local connector data; never infer freshness from task state."""
+    now = int(datetime.now(timezone.utc).timestamp())
+    status: dict[str, Any] = {}
+    max_age = int(os.getenv("SQAO_MAX_DATA_AGE_SECONDS", "180"))
+    for timeframe, granularity in GRANULARITY.items():
+        path = DATA_DIR / f"ohlc_{timeframe}.csv"
+        latest_epoch = None
+        rows = 0
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                header = next(handle, "")
+                for line in handle:
+                    parts = line.strip().split(",")
+                    if len(parts) >= 5:
+                        try:
+                            epoch = int(float(parts[0]))
+                            float(parts[4])
+                        except (ValueError, TypeError):
+                            continue
+                        latest_epoch = epoch if latest_epoch is None else max(latest_epoch, epoch)
+                        rows += 1
+        except (OSError, UnicodeError):
+            pass
+
+        age = max(0, now - latest_epoch) if latest_epoch is not None else None
+        # CSV bars use their start timestamp; allow one full bar plus the
+        # configured freshness window before calling the feed stale.
+        fresh = age is not None and age <= max_age + granularity
+        status[timeframe] = {
+            "rows": rows,
+            "latest_candle_epoch": latest_epoch,
+            "age_seconds": age,
+            "fresh": fresh,
+        }
+    return {
+        "timeframes": status,
+        "max_data_age_seconds": max_age,
+        "all_timeframes_fresh": all(item["fresh"] for item in status.values()),
+    }
+
+
+@app.get("/health")
+async def health():
+    task_exists = _connector_task is not None
+    task_running = task_exists and not _connector_task.done()
+    task_error = None
+    if task_exists and _connector_task.done():
+        try:
+            task_error = str(_connector_task.exception()) if not _connector_task.cancelled() else "cancelled"
+        except Exception as exc:
+            task_error = str(exc)
+
+    freshness = _latest_data_status()
+    connector_ok = (not RUN_CONNECTOR) or (task_running and freshness["all_timeframes_fresh"])
+    return {
+        "status": "ok" if connector_ok else "degraded",
+        "service": "SQAO Live API",
+        "version": "2.2.0",
+        "read_only": True,
+        "background_connector_enabled": RUN_CONNECTOR,
+        "background_connector_running": bool(task_running),
+        "background_connector_started_at_utc": _connector_started_at,
+        "background_connector_error": task_error,
+        "market_data": freshness,
+    }
 
 
 async def _deriv_request(payload: dict[str, Any]) -> dict[str, Any]:
@@ -112,18 +185,6 @@ async def _candles(symbol: str, timeframe: str, count: int) -> list[dict[str, An
     return data.get("candles", [])
 
 
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok",
-        "service": "SQAO Live API",
-        "version": "2.1.0",
-        "read_only": True,
-        "background_connector_enabled": RUN_CONNECTOR,
-        "background_connector_running": _connector_task is not None and not _connector_task.done(),
-    }
-
-
 @app.get("/market/active-symbols")
 async def active_symbols(x_sqao_key: str | None = Header(default=None, alias="X-SQAO-Key")):
     _check_auth(x_sqao_key)
@@ -141,6 +202,8 @@ async def ohlc(
     _check_auth(x_sqao_key)
     resolved, mode = await _resolve_symbol(symbol)
     candles = await _candles(resolved, timeframe, count)
+    if not candles:
+        raise HTTPException(status_code=502, detail=f"No candles returned for {resolved} {timeframe}")
     return {
         "symbol": resolved,
         "symbol_resolution": mode,
@@ -164,10 +227,16 @@ async def analysis_snapshot(
     frames: dict[str, list[dict[str, Any]]] = {}
     for tf in TIMEFRAMES:
         frames[tf] = await _candles(resolved, tf, count)
+        if len(frames[tf]) < 20:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Insufficient candles for {tf}: received {len(frames[tf])}, expected at least 20",
+            )
     analysis = analyze_rows({tf: [{k: str(v) for k, v in row.items()} for row in rows] for tf, rows in frames.items()})
     analysis["symbol"] = resolved
     analysis["symbol_resolution"] = mode
     analysis["source"] = "Deriv public market data"
     analysis["read_only"] = True
     analysis["candles"] = frames
+    analysis["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
     return analysis
