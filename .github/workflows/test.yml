@@ -13,6 +13,26 @@ jobs:
       - run: python -m pip install -r ENGINE/requirements.txt -r API/requirements.txt
       - run: python -m compileall -q API AI ENGINE CONNECTOR
       - run: python -m ENGINE.tests
+      - name: Step Index validation unit tests
+        run: python -m unittest tests.test_step_index_validation -v
+      - name: Step Index historical validation
+        env:
+          SQAO_STEP_CANDLES: '5000'
+          SQAO_STEP_MIN_TRADES: '100'
+          SQAO_STEP_TARGET_WIN_RATE: '0.70'
+          SQAO_STEP_RR: '1.0'
+          SQAO_STEP_ATR_MULT: '1.2'
+          SQAO_STEP_HORIZON: '5'
+          # Costs intentionally remain unconfigured until an evidence-based value is measured.
+        run: python -m ENGINE.step_index_validation
+      - name: Upload Step Index validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step-index-validation-${{ github.run_number }}
+          path: DATA/step_index_validation.json
+          if-no-files-found: warn
+          retention-days: 30
       - run: python -m ENGINE.live_pipeline
       - name: Deriv public WebSocket smoke test
         run: |
