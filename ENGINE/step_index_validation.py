@@ -161,8 +161,10 @@ async def main():
     # Discard any trades before holdout cutoff.
     pairs=[(x,tr) for x,tr in zip(rs,trades) if int(tr["epoch"])>=cutoff]
     rs=[p[0] for p in pairs];trades=[p[1] for p in pairs]
-    m=summarize(rs)
-    passed=(m["trades"]>=MIN_TRADES and m["win_rate"] is not None and m["win_rate"]>=TARGET_WIN_RATE and m["win_rate_wilson_95_low"]>=TARGET_WIN_RATE and isinstance(m["profit_factor"],(int,float)) and m["profit_factor"]>1 and (m["expectancy_R"] or -1)>0)
+    gross_metrics=summarize(rs)
+    net_rs=[x-COST_R for x in rs] if COST_R is not None else None
+    m=summarize(net_rs) if net_rs is not None else gross_metrics
+    passed=(COST_R is not None and m["trades"]>=MIN_TRADES and m["win_rate"] is not None and m["win_rate"]>=TARGET_WIN_RATE and m["win_rate_wilson_95_low"]>=TARGET_WIN_RATE and isinstance(m["profit_factor"],(int,float)) and m["profit_factor"]>1 and (m["expectancy_R"] or -1)>0)
     report={"generated_utc":datetime.now(timezone.utc).isoformat(),"symbol":symbol,"strategy":"M5 EMA10/20 + 20-close breakout; M15/H1 EMA trend confirmation; M1 RSI guard","timeframes":{"M1":len(m1),"M5":len(m5),"M15":len(m15),"H1":len(h1)},"holdout_start_utc":datetime.fromtimestamp(cutoff,timezone.utc).isoformat(),"parameters":{"target_win_rate":TARGET_WIN_RATE,"min_trades":MIN_TRADES,"rr":RR,"atr_multiplier":ATR_MULT,"horizon_M5_candles":HORIZON,"round_trip_cost_R":COST_R,"costs_status":"NET COST ADJUSTMENT APPLIED" if COST_R is not None else "NOT MODELED: set SQAO_STEP_COST_R to an evidence-based round-trip cost expressed in R","candle_timestamp_policy":"Higher-timeframe and M1 filters only use candles fully closed by the M5 signal close"},"metrics":{"gross":gross_metrics,"net":m if net_rs is not None else None},"decision":"CANDIDATE_FOR_DEMO_ONLY" if passed else ("NO_TRADE_COSTS_UNCONFIGURED" if COST_R is None else "NO_TRADE"),"trades":trades}
     OUT.parent.mkdir(parents=True,exist_ok=True);OUT.write_text(json.dumps(report,indent=2),encoding="utf-8")
     print(json.dumps({k:v for k,v in report.items() if k!="trades"},indent=2))
