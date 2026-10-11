@@ -49,7 +49,7 @@ async def request(ws,payload):
 async def get_candles(symbol, granularity, count):
     import websockets
     async with websockets.connect(WS,ping_interval=20,ping_timeout=20,open_timeout=20) as ws:
-        m=await request(ws,{"ticks_history":symbol,"end":"latest","count":count,"style":"candles","granularity":granularity,"adjust_start_time":1,"subscribe":0,"req_id":granularity})
+        m=await request(ws,{"ticks_history":symbol,"end":"latest","count":count,"style":"candles","granularity":granularity,"adjust_start_time":1,"req_id":granularity})
     rows=m.get("candles",[])
     return sorted((r for r in rows if all(k in r for k in ("epoch","open","high","low","close"))),key=lambda r:int(r["epoch"]))
 
