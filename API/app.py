@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+from contextlib import suppress
 from typing import Any
 
 import websockets
@@ -13,8 +15,34 @@ DERIV_WS = os.getenv("DERIV_PUBLIC_WS", "wss://api.derivws.com/trading/v1/option
 API_KEY = os.getenv("SQAO_ACTION_KEY", "").strip()
 TIMEFRAMES = ("D1", "H1", "M15", "M5", "M1")
 GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "D1": 86400}
+RUN_CONNECTOR = os.getenv("SQAO_RUN_CONNECTOR", "true").strip().lower() in {"1", "true", "yes", "on"}
 
-app = FastAPI(title="SQAO Live API", version="2.0.0", docs_url="/docs", redoc_url="/redoc")
+app = FastAPI(title="SQAO Live API", version="2.1.0", docs_url="/docs", redoc_url="/redoc")
+_connector_task: asyncio.Task | None = None
+
+
+async def _run_connector_background() -> None:
+    """Keep the read-only tick/candle pipeline running alongside the API."""
+    from CONNECTOR.deriv_live import run as run_live_connector
+
+    await run_live_connector()
+
+
+@app.on_event("startup")
+async def start_background_connector() -> None:
+    global _connector_task
+    if RUN_CONNECTOR and _connector_task is None:
+        _connector_task = asyncio.create_task(_run_connector_background(), name="sqao-deriv-live-connector")
+
+
+@app.on_event("shutdown")
+async def stop_background_connector() -> None:
+    global _connector_task
+    if _connector_task is not None:
+        _connector_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await _connector_task
+        _connector_task = None
 
 
 def _auth_ok(key: str | None) -> bool:
@@ -86,7 +114,14 @@ async def _candles(symbol: str, timeframe: str, count: int) -> list[dict[str, An
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "SQAO Live API", "version": "2.0.0", "read_only": True}
+    return {
+        "status": "ok",
+        "service": "SQAO Live API",
+        "version": "2.1.0",
+        "read_only": True,
+        "background_connector_enabled": RUN_CONNECTOR,
+        "background_connector_running": _connector_task is not None and not _connector_task.done(),
+    }
 
 
 @app.get("/market/active-symbols")
