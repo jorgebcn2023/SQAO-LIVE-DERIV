@@ -1,0 +1,40 @@
+name: Step Index Validation
+on:
+  workflow_dispatch:
+    inputs:
+      candles:
+        description: "Historical candles per timeframe"
+        required: false
+        default: "5000"
+  schedule:
+    - cron: "17 2 * * 1"
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip websockets
+      - name: Run Step Index historical validation
+        env:
+          SQAO_STEP_CANDLES: ${{ github.event.inputs.candles || '5000' }}
+          SQAO_STEP_MIN_TRADES: "100"
+          SQAO_STEP_TARGET_WIN_RATE: "0.70"
+          SQAO_STEP_RR: "1.0"
+          SQAO_STEP_ATR_MULT: "1.2"
+          SQAO_STEP_HORIZON: "5"
+        run: python -m ENGINE.step_index_validation
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step-index-validation-${{ github.run_number }}
+          path: DATA/step_index_validation.json
+          if-no-files-found: warn
+          retention-days: 30
