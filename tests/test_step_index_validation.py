@@ -1,5 +1,5 @@
 import unittest
-from ENGINE.step_index_validation import ema, rsi, atr, wilson, summarize, trend_at
+from ENGINE.step_index_validation import ema, rsi, atr, wilson, summarize, trend_at, parse_step_symbols
 
 class ValidationMetricsTests(unittest.TestCase):
     def test_ema(self):
@@ -23,6 +23,21 @@ class ValidationMetricsTests(unittest.TestCase):
         self.assertIsNone(trend_at(rows, rows[-1]["epoch"], 900))
         # One full timeframe later, all 30 bars are eligible.
         self.assertEqual(trend_at(rows, rows[-1]["epoch"]+900, 900), "LONG")
+
+    def test_symbol_parser_supports_current_deriv_schema(self):
+        payload={"active_symbols":[
+            {"underlying_symbol_name":"Step Index","underlying_symbol":"stpRNG"},
+            {"underlying_symbol_name":"Volatility 100 Index","underlying_symbol":"R_100"},
+            {"display_name":"Step Index 200","symbol":"stpRNG2"},
+        ]}
+        self.assertEqual(parse_step_symbols(payload),[
+            {"symbol":"stpRNG","name":"Step Index"},
+            {"symbol":"stpRNG2","name":"Step Index 200"},
+        ])
+
+    def test_symbol_parser_supports_legacy_deriv_schema(self):
+        payload={"active_symbols":[{"display_name":"Step Index","symbol":"stpRNG"}]}
+        self.assertEqual(parse_step_symbols(payload),[{"symbol":"stpRNG","name":"Step Index"}])
 
     def test_summary_reports_win_rate_and_drawdown(self):
         m=summarize([1.0,-1.0,1.0])
