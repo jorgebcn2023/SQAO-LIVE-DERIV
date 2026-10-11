@@ -63,8 +63,9 @@ async def find_step_symbol():
     exact=[x for x in matches if x["name"].strip().lower()=="step index"]
     return (exact or matches)[0]
 
-def trend_at(rows, epoch):
-    eligible=[r for r in rows if int(r["epoch"]) <= epoch]
+def trend_at(rows, decision_epoch, granularity):
+    # Deriv candle epoch is its OPEN time; only use bars whose close was known at decision time.
+    eligible=[r for r in rows if int(r["epoch"]) + granularity <= decision_epoch]
     if len(eligible)<30:return None
     closes=[float(r["close"]) for r in eligible]
     a,b=ema(closes,10),ema(closes,20)
@@ -95,9 +96,9 @@ def backtest(m1,m5,m15,h1):
         if len(prev)<20:continue
         direction="LONG" if closes[-1]>max(prev) and e10>e20 else "SHORT" if closes[-1]<min(prev) and e10<e20 else None
         if not direction:continue
-        if trend_at(m15,t)!=direction or trend_at(h1,t)!=direction:continue
+        decision_epoch=t+300  # M5 signal candle has just closed at this instant.\n        if trend_at(m15,decision_epoch,900)!=direction or trend_at(h1,decision_epoch,3600)!=direction:continue
         # RSI on M1 is a timing guard, using only candles closed by signal time.
-        m1hist=[x for x in m1 if int(x["epoch"])<=t]
+        m1hist=[x for x in m1 if int(x["epoch"])+60<=decision_epoch]
         c1=[float(x["close"]) for x in m1hist]
         rv=rsi(c1)
         if rv is None or (direction=="LONG" and rv>72) or (direction=="SHORT" and rv<28):continue
@@ -158,7 +159,7 @@ async def main():
     rs=[p[0] for p in pairs];trades=[p[1] for p in pairs]
     m=summarize(rs)
     passed=(m["trades"]>=MIN_TRADES and m["win_rate"] is not None and m["win_rate"]>=TARGET_WIN_RATE and m["win_rate_wilson_95_low"]>=TARGET_WIN_RATE and isinstance(m["profit_factor"],(int,float)) and m["profit_factor"]>1 and (m["expectancy_R"] or -1)>0)
-    report={"generated_utc":datetime.now(timezone.utc).isoformat(),"symbol":symbol,"strategy":"M5 EMA10/20 + 20-close breakout; M15/H1 EMA trend confirmation; M1 RSI guard","timeframes":{"M1":len(m1),"M5":len(m5),"M15":len(m15),"H1":len(h1)},"holdout_start_utc":datetime.fromtimestamp(cutoff,timezone.utc).isoformat(),"parameters":{"target_win_rate":TARGET_WIN_RATE,"min_trades":MIN_TRADES,"rr":RR,"atr_multiplier":ATR_MULT,"horizon_M5_candles":HORIZON,"costs":"NOT MODELED; results are gross and cannot validate live profitability"},"metrics":m,"decision":"CANDIDATE_FOR_DEMO_ONLY" if passed else "NO_TRADE","trades":trades}
+    report={"generated_utc":datetime.now(timezone.utc).isoformat(),"symbol":symbol,"strategy":"M5 EMA10/20 + 20-close breakout; M15/H1 EMA trend confirmation; M1 RSI guard","timeframes":{"M1":len(m1),"M5":len(m5),"M15":len(m15),"H1":len(h1)},"holdout_start_utc":datetime.fromtimestamp(cutoff,timezone.utc).isoformat(),"parameters":{"target_win_rate":TARGET_WIN_RATE,"min_trades":MIN_TRADES,"rr":RR,"atr_multiplier":ATR_MULT,"horizon_M5_candles":HORIZON,"costs":"NOT MODELED; results are gross and cannot validate live profitability", "candle_timestamp_policy":"Higher-timeframe and M1 filters only use candles fully closed by the M5 signal close"},"metrics":m,"decision":"CANDIDATE_FOR_DEMO_ONLY" if passed else "NO_TRADE","trades":trades}
     OUT.parent.mkdir(parents=True,exist_ok=True);OUT.write_text(json.dumps(report,indent=2),encoding="utf-8")
     print(json.dumps({k:v for k,v in report.items() if k!="trades"},indent=2))
     print("Trade log:",OUT)
