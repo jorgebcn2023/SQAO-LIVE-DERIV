@@ -115,7 +115,7 @@ async def seed_history(ws, symbol: str, output: Path, count: int = 500):
             "style": "candles",
             "granularity": granularity,
             "adjust_start_time": 1,
-            "subscribe": 0,
+            "subscribe": 1,
             "req_id": req_id,
         }
         await ws.send(json.dumps(payload))
