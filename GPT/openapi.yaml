@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: SQAO Live Deriv API
-  version: 2.1.0
+  version: 2.2.0
   description: >-
-    Read-only live Deriv Step Index market-data API. The snapshot returns D1,
-    H1, M15, M5 and M1 candles and quantitative indicators. Scenario estimates
+    Read-only live Deriv Step Index market-data API. Snapshot includes D1,
+    H1, M15, M5 and M1 candles plus quantitative indicators. Scenario estimates
     are not historical win rates or guarantees. No trading operations are exposed.
 servers:
   - url: https://sqao-live-api.onrender.com
@@ -12,22 +12,31 @@ paths:
   /health:
     get:
       operationId: health
-      summary: Check API and background connector health
+      summary: Check API, connector task and market-data freshness
       security: []
       responses:
         '200':
-          description: API status and connector state
+          description: Service state and data freshness for all required timeframes
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  status: {type: string}
+                  status: {type: string, enum: [ok, degraded]}
                   service: {type: string}
                   version: {type: string}
                   read_only: {type: boolean}
                   background_connector_enabled: {type: boolean}
                   background_connector_running: {type: boolean}
+                  background_connector_started_at_utc: {type: string, nullable: true}
+                  background_connector_error: {type: string, nullable: true}
+                  market_data:
+                    type: object
+                    properties:
+                      max_data_age_seconds: {type: integer}
+                      all_timeframes_fresh: {type: boolean}
+                      timeframes:
+                        type: object
   /market/active-symbols:
     get:
       operationId: getActiveStepSymbols
@@ -66,14 +75,16 @@ paths:
             application/json:
               schema:
                 type: object
+        '502':
+          description: Deriv upstream error or insufficient market data
   /analysis/snapshot:
     get:
       operationId: getSQAOQuantSnapshot
       summary: Get complete live multi-timeframe analysis
       description: >-
         Resolves symbol=AUTO against active Step Index symbols, retrieves
-        D1/H1/M15/M5/M1 candles and computes the quantitative snapshot.
-        Treat decisions and scenario probabilities as estimates, not guarantees.
+        D1/H1/M15/M5/M1 candles and computes a conservative quantitative snapshot.
+        Treat decisions and scenario scores as estimates, not validated win rates.
       parameters:
         - name: symbol
           in: query
@@ -90,3 +101,5 @@ paths:
             application/json:
               schema:
                 type: object
+        '502':
+          description: Deriv upstream error or insufficient candles
