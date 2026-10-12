@@ -133,7 +133,8 @@ def analyze_backtest(r_multiples: Iterable[float], close_prices: Iterable[float]
         "sample_sd": _finite_sample_sd(logs),
         "geometric_return_fraction": math.expm1(sum(logs)) if logs else None,
     }
-    stats["compounding_scenarios"] = [log_compounding(raw_rs, f) for f in (0.005, 0.01, 0.02)]
+    net_rs = [value - cost for value in raw_rs]
+    stats["compounding_scenarios"] = [log_compounding(net_rs, f) for f in (0.005, 0.01, 0.02)]
     stats["acceptance"] = acceptance_gate(
         stats, min_trades=min_trades, require_costs=True, costs_supplied=costs_supplied
     )
