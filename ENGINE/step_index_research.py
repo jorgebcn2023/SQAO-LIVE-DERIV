@@ -144,16 +144,55 @@ async def fetch_candles(symbol: str, timeframe: str, count: int) -> list[dict[st
     return [all_rows[k] for k in sorted(all_rows)][-count:]
 
 
-def trend_at(rows: list[dict[str, Any]], decision_epoch: int, timeframe: str) -> str | None:
+def ema_series(values: list[float], period: int) -> list[float | None]:
+    """EMA values aligned to input rows, in O(n) time."""
+    out: list[float | None] = [None] * len(values)
+    if len(values) < period:
+        return out
+    alpha = 2.0 / (period + 1.0)
+    value = sum(values[:period]) / period
+    out[period - 1] = value
+    for i in range(period, len(values)):
+        value = values[i] * alpha + value * (1.0 - alpha)
+        out[i] = value
+    return out
+
+
+def atr_series(rows: list[dict[str, Any]], period: int = 14) -> list[float | None]:
+    """Simple rolling ATR aligned to candles, matching atr() semantics."""
+    out: list[float | None] = [None] * len(rows)
+    if len(rows) < period + 1:
+        return out
+    trs: list[float] = []
+    for i in range(1, len(rows)):
+        high, low, previous_close = float(rows[i]["high"]), float(rows[i]["low"]), float(rows[i - 1]["close"])
+        trs.append(max(high - low, abs(high - previous_close), abs(low - previous_close)))
+        if len(trs) >= period:
+            out[i] = sum(trs[-period:]) / period
+    return out
+
+
+def _trend_cache(rows: list[dict[str, Any]], timeframe: str) -> tuple[list[int], list[float | None], list[float | None]]:
     seconds = GRANULARITY[timeframe]
-    eligible = [r for r in rows if int(r["epoch"]) + seconds <= decision_epoch]
-    if len(eligible) < 30:
+    decision_epochs = [int(row["epoch"]) + seconds for row in rows]
+    closes = [float(row["close"]) for row in rows]
+    return decision_epochs, ema_series(closes, 10), ema_series(closes, 20)
+
+
+def _cached_trend_at(cache: tuple[list[int], list[float | None], list[float | None]], decision_epoch: int) -> str | None:
+    epochs, fast_values, slow_values = cache
+    index = bisect.bisect_right(epochs, decision_epoch) - 1
+    if index < 29:
         return None
-    c = [float(r["close"]) for r in eligible]
-    fast, slow = ema(c, 10), ema(c, 20)
+    fast, slow = fast_values[index], slow_values[index]
     if fast is None or slow is None or fast == slow:
         return None
     return "LONG" if fast > slow else "SHORT"
+
+
+def trend_at(rows: list[dict[str, Any]], decision_epoch: int, timeframe: str) -> str | None:
+    """Reference implementation for tests and occasional live lookups."""
+    return _cached_trend_at(_trend_cache(rows, timeframe), decision_epoch)
 
 
 def signal_m5(hist: list[dict[str, Any]]) -> str | None:
@@ -185,22 +224,34 @@ def backtest_m5(
     split = int(len(m5) * train_fraction)
     trades: list[dict[str, Any]] = []
     next_allowed = 0
+    closes = [float(row["close"]) for row in m5]
+    ema10 = ema_series(closes, 10)
+    ema20 = ema_series(closes, 20)
+    atr_values = atr_series(m5, 14)
+    m15_cache = _trend_cache(m15, "M15")
+    h1_cache = _trend_cache(h1, "H1")
     for i in range(40, max(40, len(m5) - horizon - 1)):
         if i < next_allowed or i + 1 >= len(m5):
             continue
-        hist = m5[:i + 1]
-        direction = signal_m5(hist)
+        direction = None
+        fast, slow = ema10[i], ema20[i]
+        previous = m5[i - 20:i]
+        if fast is not None and slow is not None and len(previous) == 20:
+            if closes[i] > max(float(x["high"]) for x in previous) and fast > slow:
+                direction = "LONG"
+            elif closes[i] < min(float(x["low"]) for x in previous) and fast < slow:
+                direction = "SHORT"
         if not direction:
             continue
         decision_epoch = int(m5[i]["epoch"]) + GRANULARITY["M5"]
-        if trend_at(m15, decision_epoch, "M15") != direction:
+        if _cached_trend_at(m15_cache, decision_epoch) != direction:
             continue
-        if trend_at(h1, decision_epoch, "H1") != direction:
+        if _cached_trend_at(h1_cache, decision_epoch) != direction:
             continue
-        risk = atr(hist, 14)
-        if risk is None or risk <= 0:
+        risk_value = atr_values[i]
+        if risk_value is None or risk_value <= 0:
             continue
-        risk *= atr_mult
+        risk = risk_value * atr_mult
         entry_bar = m5[i + 1]
         entry = float(entry_bar["open"])
         stop = entry - risk if direction == "LONG" else entry + risk
