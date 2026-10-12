@@ -307,19 +307,94 @@ def backtest_m5(
     }
 
 
+def indicator_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    c = [float(r["close"]) for r in rows]
+    e10, e20 = ema(c, 10), ema(c, 20)
+    e12, e26 = ema_series(c, 12), ema_series(c, 26)
+    macd_line = [a - b if a is not None and b is not None else None for a, b in zip(e12, e26)]
+    compact_macd = [x for x in macd_line if x is not None]
+    macd_signal_values = ema_series(compact_macd, 9)
+    macd_value = compact_macd[-1] if compact_macd else None
+    signal_value = macd_signal_values[-1] if macd_signal_values else None
+    bb_mid = bb_low = bb_high = None
+    if len(c) >= 20:
+        recent = c[-20:]
+        bb_mid = sum(recent) / 20
+        sd = math.sqrt(sum((x - bb_mid) ** 2 for x in recent) / 20)
+        bb_low, bb_high = bb_mid - 2 * sd, bb_mid + 2 * sd
+    stoch_values = []
+    for i in range(max(8, len(rows) - 10), len(rows)):
+        segment = rows[max(0, i - 8):i + 1]
+        lo = min(float(x["low"]) for x in segment)
+        hi = max(float(x["high"]) for x in segment)
+        stoch_values.append(50.0 if hi == lo else 100.0 * (float(rows[i]["close"]) - lo) / (hi - lo))
+    stoch_k = stoch_values[-1] if stoch_values else None
+    stoch_d = sum(stoch_values[-3:]) / min(3, len(stoch_values)) if stoch_values else None
+    fib = {}
+    if rows:
+        hi = max(float(x["high"]) for x in rows[-100:])
+        lo = min(float(x["low"]) for x in rows[-100:])
+        span = hi - lo
+        fib = {str(ratio): hi - span * ratio for ratio in (0.236, 0.382, 0.5, 0.618, 0.786)}
+    return {
+        "candles": len(rows), "last_closed_epoch": int(rows[-1]["epoch"]) if rows else None,
+        "last_close": c[-1] if c else None, "ema10": e10, "ema20": e20,
+        "direction": "LONG" if e10 is not None and e20 is not None and e10 > e20 else
+                     "SHORT" if e10 is not None and e20 is not None and e10 < e20 else "UNKNOWN",
+        "rsi14": rsi(c), "atr14": atr(rows, 14),
+        "macd_line": macd_value, "macd_signal": signal_value,
+        "macd_histogram": macd_value - signal_value if macd_value is not None and signal_value is not None else None,
+        "bollinger20_lower": bb_low, "bollinger20_middle": bb_mid, "bollinger20_upper": bb_high,
+        "stochastic9_k": stoch_k, "stochastic9_d": stoch_d,
+        "fibonacci_rolling_100": fib,
+    }
+
+
 def snapshot(frames: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-    indicators = {}
-    for tf, rows in frames.items():
-        c = [float(r["close"]) for r in rows]
-        e10, e20 = ema(c, 10), ema(c, 20)
-        indicators[tf] = {
-            "candles": len(rows), "last_closed_epoch": int(rows[-1]["epoch"]) if rows else None,
-            "last_close": c[-1] if c else None, "ema10": e10, "ema20": e20,
-            "direction": "LONG" if e10 is not None and e20 is not None and e10 > e20 else
-                         "SHORT" if e10 is not None and e20 is not None and e10 < e20 else "UNKNOWN",
-            "rsi14": rsi(c), "atr14": atr(rows, 14),
-        }
-    return indicators
+    return {tf: indicator_snapshot(rows) for tf, rows in frames.items()}
+
+
+def current_setup(frames: dict[str, list[dict[str, Any]]], *, rr: float = 1.5, atr_mult: float = 1.2) -> dict[str, Any]:
+    m5, m15, h1 = frames.get("M5", []), frames.get("M15", []), frames.get("H1", [])
+    if len(m5) < 40 or len(m15) < 30 or len(h1) < 30:
+        return {"confirmed": False, "state": "INSUFFICIENT_DATA"}
+    direction = signal_m5(m5)
+    last = m5[-1]
+    decision_epoch = int(last["epoch"]) + GRANULARITY["M5"]
+    if not direction:
+        return {"confirmed": False, "state": "NO_CURRENT_TRIGGER",
+                "reference_price": float(last["close"]), "decision_epoch": decision_epoch}
+    if trend_at(m15, decision_epoch, "M15") != direction or trend_at(h1, decision_epoch, "H1") != direction:
+        return {"confirmed": False, "state": "MTF_FILTER_MISMATCH", "direction": direction,
+                "reference_price": float(last["close"]), "decision_epoch": decision_epoch}
+    volatility = atr(m5, 14)
+    if volatility is None or volatility <= 0:
+        return {"confirmed": False, "state": "ATR_UNAVAILABLE", "direction": direction}
+    entry = float(last["close"])
+    risk = volatility * atr_mult
+    stop = entry - risk if direction == "LONG" else entry + risk
+    target = entry + risk * rr if direction == "LONG" else entry - risk * rr
+    return {"confirmed": True, "state": "CONDITIONAL_SETUP",
+            "direction": direction, "reference_price": entry, "stop_reference": stop,
+            "target_reference": target, "risk_price": risk, "target_R": rr,
+            "decision_epoch": decision_epoch,
+            "note": "Reference at last closed M5 close only; confirm current quote and execution costs before any decision."}
+
+
+def oos_subperiods(trades: list[dict[str, Any]], m5: list[dict[str, Any]], train_fraction: float = 0.70, folds: int = 4) -> list[dict[str, Any]]:
+    if not m5 or folds < 2:
+        return []
+    start = int(m5[int(len(m5) * train_fraction)]["epoch"]) if int(len(m5) * train_fraction) < len(m5) else int(m5[-1]["epoch"])
+    end = int(m5[-1]["epoch"]) + GRANULARITY["M5"]
+    width = max(1, (end - start) // folds)
+    results = []
+    for index in range(folds):
+        a = start + index * width
+        b = end if index == folds - 1 else min(end, a + width)
+        sample = [t for t in trades if a <= int(t["signal_epoch"]) < b and t["sample"] == "out_of_sample"]
+        stats = equity_stats([t["net_r"] for t in sample])
+        results.append({"fold": index + 1, "start_epoch": a, "end_epoch": b, "stats_net": stats})
+    return results
 
 
 def log_distribution(closes: list[float]) -> dict[str, Any]:
