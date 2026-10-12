@@ -427,6 +427,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.graphics.shapes import Drawing, String, Line, PolyLine
 
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="SQTitle", parent=styles["Title"], fontSize=19, leading=23,
@@ -459,13 +460,34 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     oos = report["backtest"]["out_of_sample"]
     s = oos["stats_net"]
     gate = oos["gate"]
+    setup = report.get("current_setup", {})
     pct = lambda x: "n/d" if x is None else f"{x * 100:.2f}%"
     num = lambda x, d=3: "n/d" if x is None else f"{x:.{d}f}"
+    chart = Drawing(470, 150)
+    curve = s.get("equity_curve_r", []) or [0.0]
+    if len(curve) == 1:
+        curve = curve * 2
+    low, high = min(curve), max(curve)
+    if high == low:
+        high = low + 1.0
+    left, right, bottom, top = 38, 455, 20, 125
+    chart.add(Line(left, bottom + (0 - low) / (high - low) * (top - bottom),
+                   right, bottom + (0 - low) / (high - low) * (top - bottom),
+                   strokeColor=colors.HexColor("#8996A3"), strokeWidth=.6))
+    pts = []
+    for idx, val in enumerate(curve):
+        x = left + (right - left) * idx / max(1, len(curve) - 1)
+        y = bottom + (top - bottom) * (val - low) / (high - low)
+        pts.extend([x, y])
+    chart.add(PolyLine(pts, strokeColor=colors.HexColor("#17657A"), strokeWidth=1.5))
+    chart.add(String(8, 127, f"OOS equity R | min={low:.2f} max={high:.2f}", fontSize=8, fillColor=colors.HexColor("#17324D")))
+    chart.add(String(8, 4, "Trade index", fontSize=7, fillColor=colors.HexColor("#596B7A")))
     story = [
         Spacer(1, .35*cm),
         p("SQAO · STEP INDEX QUANT RESEARCH", "SQTitle"),
         p(f"Informe técnico ejecutivo · generado {report['generated_at_utc']} · fuente Deriv public OHLC", "SQSub"),
-        p(f"DICTAMEN: {gate['decision']}", "SQH1"),
+        p(f"DICTAMEN OPERATIVO: {report['decision']}", "SQH1"),
+        p(f"Puerta estadística histórica: {gate['decision']} · setup M5 actual: {setup.get('state', 'n/d')}", "SQBody"),
         p("No se ha validado una efectividad del 70% para la próxima operación. El umbral se aplica exclusivamente a una muestra cronológica fuera de muestra con costes reales declarados. Si los criterios no se cumplen, la decisión se mantiene en NO_TRADE.", "SQAlert"),
         p("1. Resultado ejecutivo", "SQH1"),
         table([
@@ -480,11 +502,30 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         ], [4.6*cm,4.2*cm,6.0*cm]),
         Spacer(1,5),
         p("2. Resumen de marcos temporales", "SQH1"),
-        table([["Marco","Velas cerradas","Último cierre","EMA10","EMA20","RSI14","ATR14","Sesgo"]] + [
+        table([["Marco","Velas","Último cierre","EMA10","EMA20","RSI14","ATR14","Sesgo"]] + [
             [tf, x["candles"], num(x["last_close"], 2), num(x["ema10"],2), num(x["ema20"],2),
              num(x["rsi14"],2), num(x["atr14"],3), x["direction"]] for tf,x in report["indicators"].items()
-        ], [1.5*cm,2.0*cm,2.0*cm,2.0*cm,2.0*cm,1.7*cm,1.7*cm,2.2*cm]),
-        p("3. Metodología y prevención de sesgo", "SQH1"),
+        ], [1.2*cm,1.4*cm,2.2*cm,2.0*cm,2.0*cm,1.7*cm,1.7*cm,2.2*cm]),
+        p("Indicadores complementarios por marco", "SQH2"),
+        table([["Marco","MACD","Señal MACD","Histograma","BB inferior","BB superior","Stoch %K","Stoch %D"]] + [
+            [tf, num(x["macd_line"],3), num(x["macd_signal"],3), num(x["macd_histogram"],3),
+             num(x["bollinger20_lower"],2), num(x["bollinger20_upper"],2),
+             num(x["stochastic9_k"],1), num(x["stochastic9_d"],1)] for tf,x in report["indicators"].items()
+        ], [1.2*cm,2.0*cm,2.0*cm,2.0*cm,2.3*cm,2.3*cm,1.7*cm,1.7*cm]),
+        p("Fibonacci rolling (últimas 100 velas; aproximación de rango, no pivotes confirmados)", "SQH2"),
+        table([["Marco","23,6%","38,2%","50%","61,8%","78,6%"]] + [
+            [tf] + [num(x["fibonacci_rolling_100"].get(str(k)),2) for k in (0.236,0.382,0.5,0.618,0.786)]
+            for tf,x in report["indicators"].items()
+        ], [1.5*cm,2.5*cm,2.5*cm,2.5*cm,2.5*cm,2.5*cm]),
+        p("3. Escenario de scalping actual (condicional; no es una orden)", "SQH1"),
+        table([
+            ["Estado","Dirección","Precio de referencia","Stop orientativo","Objetivo orientativo","R:R"],
+            [setup.get("state","n/d"), setup.get("direction","n/d"),
+             num(setup.get("reference_price"),2), num(setup.get("stop_reference"),2),
+             num(setup.get("target_reference"),2), num(setup.get("target_R"),2)]
+        ], [3.0*cm,2.0*cm,2.8*cm,2.8*cm,3.0*cm,1.4*cm]),
+        p("Los niveles, cuando existen, usan el último cierre M5 disponible. Verifique cotización vigente, especificación del contrato y coste real antes de actuar. La operación queda bloqueada si la validación histórica no pasa todos los criterios.", "SQBody"),
+        p("4. Metodología y prevención de sesgo", "SQH1"),
         p(report["backtest"]["rule"], "SQBody"),
         p("La señal se determina al cierre de M5. EMA10/20 de M15 y H1 solo usan velas ya cerradas a la hora de decisión. La entrada de simulación se realiza en la apertura de la siguiente vela M5. Si stop y objetivo aparecen tocados en la misma vela, se contabiliza primero el stop. Las últimas velas incompletas quedan excluidas.", "SQBody"),
         p("4. Estadística y logaritmos", "SQH1"),
@@ -500,12 +541,20 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
             ["Sharpe por operación (sin anualizar)",num(s["sharpe_per_trade_not_annualized"])],
             ["Sortino por operación (sin anualizar)",num(s["sortino_per_trade_not_annualized"])],
         ], [6.0*cm,9.0*cm]),
-        p("5. Regla de aceptación", "SQH1"),
+        p("5. Curva de capital fuera de muestra", "SQH1"),
+        chart,
+        p("6. Estabilidad por subperiodos cronológicos", "SQH1"),
+        table([["Bloque OOS","Operaciones","Win rate neto","Expectativa neta (R)","PF neto"]] + [
+            [fold["fold"], fold["stats_net"]["n"], pct(fold["stats_net"]["win_rate"]),
+             num(fold["stats_net"]["expectancy_r"]), num(fold["stats_net"]["profit_factor"])]
+            for fold in oos.get("subperiods", [])
+        ], [2.3*cm,2.8*cm,3.0*cm,3.8*cm,2.8*cm]),
+        p("7. Regla de aceptación", "SQH1"),
         p("Se requiere simultáneamente tamaño de muestra suficiente, win rate observado ≥ objetivo, límite inferior de Wilson 95% ≥ objetivo, expectativa neta positiva, profit factor > 1 y costes declarados. La superación habilita revisión adicional; no garantiza rentabilidad futura ni constituye una probabilidad predictiva calibrada.", "SQBody"),
-        p("6. Limitaciones", "SQH1"),
+        p("8. Limitaciones", "SQH1"),
         p("Esta estrategia es un baseline mecánico (ruptura de 20 velas + EMA10/20 + filtros M15/H1), no una optimización del algoritmo de Step Index. El resultado depende del histórico disponible, el régimen de mercado, el coste comunicado y la fidelidad del modelo de ejecución. No hay conexión de órdenes ni ejecución real.", "SQBody"),
-        p("7. Conclusión", "SQH1"),
-        p(f"Decisión del motor: {gate['decision']}. Estado elegible: {gate['eligible']}. Si no se cumplen todos los filtros o los costes no se han definido, no se emite una operación activa.", "SQAlert"),
+        p("9. Conclusión", "SQH1"),
+        p(f"Decisión operativa del motor: {report['decision']}. Puerta histórica elegible: {gate['eligible']}. Si no se cumplen todos los filtros o los costes no se han definido, no se emite una operación activa.", "SQAlert"),
     ]
     doc = SimpleDocTemplate(str(path), pagesize=A4, rightMargin=1.4*cm, leftMargin=1.4*cm,
                             topMargin=1.1*cm, bottomMargin=1.1*cm, title="SQAO Step Index Quant Research")
