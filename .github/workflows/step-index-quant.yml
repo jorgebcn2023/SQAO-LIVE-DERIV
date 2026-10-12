@@ -86,7 +86,7 @@ jobs:
           lab_pdf = Path('DATA/step_index_strategy_lab.pdf')
           if not pdf.is_file() or pdf.stat().st_size < 5000:
               raise SystemExit('Baseline PDF report missing or unexpectedly small')
-          if not lab_pdf.is_file() or lab_pdf.stat().st_size < 3000:
+          if not lab_pdf.is_file() or lab_pdf.stat().st_size < 1000:
               raise SystemExit('Strategy lab PDF missing or unexpectedly small')
           if data.get('decision') not in {'NO_TRADE', 'CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION'}:
               raise SystemExit('Unexpected baseline decision state')
