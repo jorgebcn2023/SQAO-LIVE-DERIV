@@ -1,6 +1,20 @@
 name: SQAO Complete OS Package
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ENGINE/**'
+      - 'API/**'
+      - 'AI/**'
+      - 'CONNECTOR/**'
+      - 'GPT/**'
+      - 'SCRIPTS/**'
+      - '.github/workflows/sqao-complete-os-package.yml'
+      - '.github/workflows/step-index-quant.yml'
+      - 'README.md'
+      - 'START-SQAO.sh'
+      - 'RUN-CODESPACE.sh'
   push:
     branches: [main]
     paths:
@@ -18,7 +32,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: sqao-complete-os-package
+  group: sqao-complete-os-package-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   validate-and-package:
@@ -39,6 +53,7 @@ jobs:
           python -m ENGINE.tests
           python -m ENGINE.test_step_index_quant
           python -m ENGINE.test_step_index_strategy_lab
+          python -m ENGINE.test_step_index_advanced
       - name: Build complete OS ZIP
         env:
           PACKAGE_SHA: ${{ github.sha }}
