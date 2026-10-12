@@ -535,21 +535,30 @@ async def run_research() -> dict[str, Any]:
                      round_trip_cost_price=cost_price,
                      train_fraction=float(os.getenv("SQAO_STEP_TRAIN_FRACTION", "0.70")))
     m5_closes = [float(x["close"]) for x in frames["M5"]]
+    folds = oos_subperiods(bt["trades"], frames["M5"], float(os.getenv("SQAO_STEP_TRAIN_FRACTION", "0.70")), folds=4)
+    setup = current_setup(frames, rr=float(os.getenv("SQAO_STEP_TARGET_R", "1.5")),
+                          atr_mult=float(os.getenv("SQAO_STEP_ATR_MULT", "1.2")))
+    historical_gate = bt["out_of_sample"]["gate"]
+    # Historical gate alone never turns into an immediate live order recommendation.
+    decision = "CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION" if historical_gate["eligible"] and setup.get("confirmed") else "NO_TRADE"
+    bt["out_of_sample"]["subperiods"] = folds
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "symbol": symbol,
         "source": "Deriv public OHLC; closed candles only",
         "read_only": True,
         "indicators": snapshot(frames),
+        "current_setup": setup,
         "log_distribution_m5": log_distribution(m5_closes),
         "backtest": bt,
-        "decision": bt["out_of_sample"]["gate"]["decision"],
-        "eligibility": bt["out_of_sample"]["gate"],
-        "methodology": "chronological 70/30 split; fixed parameters; no parameter optimization; entry at next M5 open; stop first on same-bar conflict",
+        "decision": decision,
+        "historical_eligibility": historical_gate,
+        "methodology": "chronological 70/30 holdout; fixed parameters; no parameter optimization; entry at next M5 open; stop first on same-bar conflict; four descriptive chronological holdout subperiods",
         "data_counts": {tf: len(rows) for tf, rows in frames.items()},
         "limitations": ["A 70% target is not guaranteed.", "Out-of-sample history is not a prediction for the next trade.",
-                        "The rule is a baseline and requires further walk-forward validation.",
-                        "Cost-adjusted eligibility is blocked unless realistic round-trip cost is provided."],
+                        "The rule is a fixed baseline; results need independent rolling walk-forward confirmation.",
+                        "Cost-adjusted eligibility is blocked unless realistic round-trip cost is provided.",
+                        "Any candidate price is based on the last closed candle and is not a live executable quote."],
     }
 
 
