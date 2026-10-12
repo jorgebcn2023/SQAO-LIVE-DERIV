@@ -7,6 +7,7 @@ Research-only: it never sends or places trading orders.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import json
 import math
 import os
@@ -20,7 +21,8 @@ from .step_index_quant import analyze_backtest, equity_stats, log_returns, accep
 
 WS = os.getenv("DERIV_PUBLIC_WS", "wss://api.derivws.com/trading/v1/options/ws/public")
 GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "D1": 86400, "W1": 604800}
-DEFAULT_COUNTS = {"M1": 1500, "M5": 5000, "M15": 3000, "H1": 1500, "D1": 500, "W1": 200}
+MAX_CANDLE_CHUNK = 5000
+DEFAULT_COUNTS = {"M1": 5000, "M5": 20000, "M15": 7000, "H1": 2500, "D1": 1000, "W1": 260}
 
 
 def ema(values: list[float], period: int) -> float | None:
@@ -103,13 +105,43 @@ async def discover_step_index() -> dict[str, str]:
 
 
 async def fetch_candles(symbol: str, timeframe: str, count: int) -> list[dict[str, Any]]:
+    """Fetch longer histories in <=5000-candle pages, walking backward by epoch."""
+    if count <= 0:
+        raise ValueError("count must be positive")
+    all_rows: dict[int, dict[str, Any]] = {}
+    end: str | int = "latest"
+    granularity = GRANULARITY[timeframe]
     async with websockets.connect(WS, ping_interval=20, ping_timeout=20, open_timeout=20) as ws:
-        data = await _request(ws, {
-            "ticks_history": symbol, "end": "latest", "count": count,
-            "style": "candles", "granularity": GRANULARITY[timeframe],
-            "adjust_start_time": 1, "req_id": GRANULARITY[timeframe],
-        })
-    return data.get("candles", []) or []
+        request_id = 20000 + granularity
+        while len(all_rows) < count:
+            remaining = count - len(all_rows)
+            page_count = min(MAX_CANDLE_CHUNK, remaining)
+            data = await _request(ws, {
+                "ticks_history": symbol, "end": end, "count": page_count,
+                "style": "candles", "granularity": granularity,
+                "adjust_start_time": 1, "req_id": request_id,
+            })
+            page = data.get("candles", []) or []
+            if not page:
+                break
+            before = len(all_rows)
+            for row in page:
+                try:
+                    all_rows[int(row["epoch"])] = row
+                except (KeyError, TypeError, ValueError):
+                    continue
+            ordered_epochs = sorted(all_rows)
+            if len(all_rows) == before or not ordered_epochs:
+                break
+            if len(all_rows) >= count:
+                break
+            earliest = ordered_epochs[0]
+            new_end = earliest - 1
+            if not isinstance(end, str) and new_end >= end:
+                break
+            end = new_end
+            request_id += 1
+    return [all_rows[k] for k in sorted(all_rows)][-count:]
 
 
 def trend_at(rows: list[dict[str, Any]], decision_epoch: int, timeframe: str) -> str | None:
