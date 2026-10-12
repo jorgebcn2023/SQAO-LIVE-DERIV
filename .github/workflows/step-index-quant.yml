@@ -81,6 +81,11 @@ jobs:
           SQAO_DATA_DIR: DATA
         run: python -m ENGINE.step_index_strategy_lab
 
+      - name: Run explicit hypothetical round-trip cost sensitivity
+        env:
+          SQAO_DATA_DIR: DATA
+        run: python -m ENGINE.step_index_cost_sensitivity
+
       - name: Run ARIMA and 10,000-path Monte Carlo
         env:
           DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
@@ -100,7 +105,8 @@ jobs:
           data = json.loads(Path('DATA/step_index_quant_report.json').read_text(encoding='utf-8'))
           lab = json.loads(Path('DATA/step_index_strategy_lab.json').read_text(encoding='utf-8'))
           am = json.loads(Path('DATA/step_index_arima_mc.json').read_text(encoding='utf-8'))
-          for name in ['step_index_quant_report.pdf','step_index_strategy_lab.pdf','step_index_arima_mc.pdf']:
+          cost = json.loads(Path('DATA/step_index_cost_sensitivity.json').read_text(encoding='utf-8'))
+          for name in ['step_index_quant_report.pdf','step_index_strategy_lab.pdf','step_index_arima_mc.pdf','step_index_cost_sensitivity.pdf']:
               if not Path('DATA', name).is_file() or Path('DATA', name).stat().st_size < 1000:
                   raise SystemExit(f'Missing/invalid PDF: {name}')
           if data.get('decision') not in {'NO_TRADE', 'CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION'}:
@@ -128,6 +134,8 @@ jobs:
             DATA/step_index_strategy_lab.json
             DATA/step_index_arima_mc.pdf
             DATA/step_index_arima_mc.json
+            DATA/step_index_cost_sensitivity.pdf
+            DATA/step_index_cost_sensitivity.json
             DATA/step_index_mc_paths.png
             DATA/step_index_mc_distribution.png
             DATA/step_index_arima_oos.png
