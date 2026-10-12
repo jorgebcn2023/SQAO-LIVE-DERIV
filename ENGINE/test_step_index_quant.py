@@ -85,6 +85,40 @@ def test_backtest_rejects_unvalidated_costs():
     assert result["out_of_sample"]["gate"]["checks"]["round_trip_costs_provided"] is False
 
 
+
+def test_executive_pdf_generation():
+    import tempfile
+    from pathlib import Path
+    from ENGINE.step_index_research import indicator_snapshot, log_distribution, write_pdf
+    rows = []
+    for i in range(120):
+        close = 7350.0 + i * 0.15 + 0.3 * math.sin(i / 4)
+        rows.append({"epoch": 1_700_000_000 + i * 300, "open": close - 0.05,
+                     "high": close + 0.2, "low": close - 0.2, "close": close})
+    stats = equity_stats([1.5, -1.0, 1.5, -1.0, 0.3])
+    report = {
+        "generated_at_utc": "2026-10-12T00:00:00+00:00",
+        "decision": "NO_TRADE",
+        "symbol": {"symbol": "TEST", "display_name": "Synthetic Step Index"},
+        "current_setup": {"confirmed": False, "state": "NO_CURRENT_TRIGGER"},
+        "indicators": {"M5": indicator_snapshot(rows)},
+        "log_distribution_m5": log_distribution([x["close"] for x in rows]),
+        "backtest": {
+            "rule": "Test rule",
+            "parameters": {"round_trip_cost_price": None},
+            "out_of_sample": {"n_trades": stats["n"], "stats_gross": stats,
+                              "stats_net": stats, "gate": acceptance_gate(stats, costs_supplied=False),
+                              "subperiods": []},
+            "trades": [],
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "step-index-test.pdf"
+        write_pdf(report, path)
+        assert path.is_file()
+        assert path.stat().st_size > 3000
+
+
 if __name__ == "__main__":
     test_log_returns()
     test_wilson_small_sample()
@@ -96,4 +130,5 @@ if __name__ == "__main__":
     test_log_distribution_is_finite()
     test_signal_uses_prior_bars_only()
     test_backtest_rejects_unvalidated_costs()
+    test_executive_pdf_generation()
     print("Step Index quant tests: OK")
