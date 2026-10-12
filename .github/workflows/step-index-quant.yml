@@ -1,0 +1,91 @@
+name: SQAO Step Index Quant Research
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 */6 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'ENGINE/step_index_quant.py'
+      - 'ENGINE/step_index_research.py'
+      - 'ENGINE/test_step_index_quant.py'
+      - 'ENGINE/requirements.txt'
+      - '.github/workflows/step-index-quant.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sqao-step-index-quant
+  cancel-in-progress: true
+
+jobs:
+  step-index-quant:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ENGINE/requirements.txt
+
+      - name: Install research dependencies
+        run: python -m pip install -r ENGINE/requirements.txt
+
+      - name: Compile and test
+        run: |
+          python -m compileall -q ENGINE
+          python -m ENGINE.test_step_index_quant
+
+      - name: Run Step Index OHLC research and generate PDF
+        env:
+          DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
+          SQAO_STEP_CANDLES_M1: '5000'
+          SQAO_STEP_CANDLES_M5: '20000'
+          SQAO_STEP_CANDLES_M15: '7000'
+          SQAO_STEP_CANDLES_H1: '2500'
+          SQAO_STEP_CANDLES_D1: '1000'
+          SQAO_STEP_CANDLES_W1: '260'
+          SQAO_STEP_HORIZON_M5: '5'
+          SQAO_STEP_TARGET_R: '1.5'
+          SQAO_STEP_ATR_MULT: '1.2'
+          SQAO_STEP_TRAIN_FRACTION: '0.70'
+          SQAO_STEP_MIN_OOS_TRADES: '100'
+          SQAO_STEP_TARGET_WIN_RATE: '0.70'
+          # Intentionally not defaulted: supply realistic total round-trip costs via repository Actions variables/secrets.
+          SQAO_STEP_ROUND_TRIP_COST_PRICE: ${{ vars.SQAO_STEP_ROUND_TRIP_COST_PRICE }}
+          SQAO_DATA_DIR: DATA
+        run: python -m ENGINE.step_index_research
+
+      - name: Validate JSON and PDF outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('DATA/step_index_quant_report.json').read_text(encoding='utf-8'))
+          pdf = Path('DATA/step_index_quant_report.pdf')
+          if not pdf.is_file() or pdf.stat().st_size < 5000:
+              raise SystemExit('PDF report missing or unexpectedly small')
+          if data.get('decision') not in {'NO_TRADE', 'CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION'}:
+              raise SystemExit('Unexpected decision state')
+          print('STEP_INDEX_QUANT_REPORT_OK', 'symbol=', data['symbol']['symbol'],
+                'decision=', data['decision'],
+                'oos_trades=', data['backtest']['out_of_sample']['n_trades'],
+                'win_rate=', data['backtest']['out_of_sample']['stats_net']['win_rate'])
+          PY
+
+      - name: Upload reproducible report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqao-step-index-quant-${{ github.run_number }}
+          path: |
+            DATA/step_index_quant_report.pdf
+            DATA/step_index_quant_report.json
+          if-no-files-found: error
+          retention-days: 30

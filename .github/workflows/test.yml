@@ -13,6 +13,7 @@ jobs:
       - run: python -m pip install -r ENGINE/requirements.txt -r API/requirements.txt
       - run: python -m compileall -q API AI ENGINE CONNECTOR
       - run: python -m ENGINE.tests
+      - run: python -m ENGINE.test_step_index_quant
       - run: python -m ENGINE.live_pipeline
       - name: Deriv public WebSocket smoke test
         run: |
