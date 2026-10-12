@@ -21,7 +21,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from .step_index_quant import acceptance_gate, equity_stats
 from .step_index_research import (
     GRANULARITY, atr_series, closed_candles, discover_step_index, ema_series,
-    fetch_candles, rsi,
+    fetch_candles, rsi, _trend_cache, _cached_trend_at,
 )
 
 
@@ -32,15 +32,9 @@ def _rsi_series(closes: list[float], period: int = 14) -> list[float | None]:
     return out
 
 
-def _direction_at(rows: list[dict[str, Any]], epoch: int) -> str | None:
-    eligible = [r for r in rows if int(r["epoch"]) + GRANULARITY["M15"] <= epoch]
-    if len(eligible) < 30:
-        return None
-    closes = [float(r["close"]) for r in eligible]
-    fast, slow = ema_series(closes, 10)[-1], ema_series(closes, 20)[-1]
-    if fast is None or slow is None or fast == slow:
-        return None
-    return "LONG" if fast > slow else "SHORT"
+def _direction_at(cache: tuple[list[int], list[float | None], list[float | None]], epoch: int) -> str | None:
+    """Return trend using completed candles only; cached close epochs respect each timeframe."""
+    return _cached_trend_at(cache, epoch)
 
 
 def _signal(name: str, i: int, rows: list[dict[str, Any]],
@@ -87,6 +81,8 @@ def evaluate_strategy(
     e10, e20 = ema_series(closes, 10), ema_series(closes, 20)
     atrs, rsis = atr_series(m5, 14), _rsi_series(closes)
     split = int(len(m5) * train_fraction)
+    m15_cache = _trend_cache(m15, "M15")
+    h1_cache = _trend_cache(h1, "H1")
     trades: list[dict[str, Any]] = []
     next_allowed = 40
     for i in range(40, len(m5) - horizon - 1):
@@ -97,7 +93,7 @@ def evaluate_strategy(
             continue
         decision_epoch = int(m5[i]["epoch"]) + GRANULARITY["M5"]
         if name != "rsi_reversal":
-            if _direction_at(m15, decision_epoch) != direction or _direction_at(h1, decision_epoch) != direction:
+            if _direction_at(m15_cache, decision_epoch) != direction or _direction_at(h1_cache, decision_epoch) != direction:
                 continue
         a = atrs[i]
         if a is None or a <= 0:
