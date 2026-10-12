@@ -72,3 +72,22 @@ python -m compileall -q API AI ENGINE CONNECTOR
 python -m ENGINE.tests
 python -m ENGINE.synthetic_research
 ```
+
+
+## Step Index Quant Validation (added)
+
+Research-only statistical tooling for Step Index is available in `ENGINE/step_index_quant.py`. It adds:
+
+- Natural-logarithmic market returns: `ln(P[t] / P[t-1])`.
+- R-multiple equity statistics: observed win rate, two-sided Wilson 95% confidence interval, expectancy, sample deviation, profit factor, drawdown, per-trade Sharpe/Sortino.
+- Hypothetical risk-fraction compounding at 0.5%, 1%, and 2%, using log growth `sum(ln(1 + f * R))`.
+- An explicit evidence gate requiring at least 100 out-of-sample trades, observed win rate at/above target, Wilson lower 95% bound at/above target, positive net expectancy, profit factor above 1, and user-supplied round-trip costs.
+- Regression tests in `ENGINE/test_step_index_quant.py`.
+
+Example validation command:
+
+```bash
+python -m ENGINE.test_step_index_quant
+```
+
+**Important:** the 70% figure is an acceptance threshold, never a guaranteed result or the probability of the next trade. This helper analyzes supplied closed-trade R multiples and close prices; it does not by itself perform a live Step Index backtest. Use clean chronological out-of-sample OHLC data and realistic spread/commission/slippage inputs before evaluating any strategy. If the evidence gate fails, the correct output is `NO_TRADE`.
