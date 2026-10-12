@@ -232,8 +232,42 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                                ("FONTSIZE", (0, 0), (-1, -1), 8),
                                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#edf2f7")])]))
-    story.extend([table, Spacer(1, 12), Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.",
-                                                styles["Heading3"])])
+    story.extend([table, Spacer(1, 12), Paragraph("Diagnósticos avanzados (solo investigación)", styles["Heading2"])])
+    snap = report.get("advanced_snapshot", {})
+    cycle = snap.get("fft_cycle_m5", {})
+    sq = snap.get("squeeze_m5", {})
+    story.append(Paragraph(
+        f"Hurst M5: {snap.get('hurst_m5')} ({snap.get('hurst_regime_m5')}); "
+        f"Fisher M5: {snap.get('fisher_m5')}; "
+        f"FFT periodo dominante: {cycle.get('dominant_period_bars') if cycle.get('available') else 'N/D'} velas; "
+        f"Squeeze: {sq.get('squeeze')}; liberación: {sq.get('release')}; "
+        f"confirmación de volumen: {sq.get('volume_confirmed')}.",
+        styles["BodyText"]))
+    story.append(Spacer(1, 8))
+    adv_rows = [["Estrategia", "OOS candidatos", "Bayes pasa filtro", "Acierto filtrado", "MC P05 win rate", "MC P05 equity R"]]
+    for item in report["strategies"]:
+        adv = item.get("advanced_bayesian_oos", {})
+        stats = adv.get("qualified_stats", {})
+        mc = adv.get("qualified_monte_carlo", {})
+        pct = lambda x: "N/D" if x is None else f"{100*x:.2f}%"
+        num = lambda x: "N/D" if x is None else f"{x:.3f}"
+        adv_rows.append([item["strategy"], str(adv.get("candidate_count", 0)),
+                         str(adv.get("qualified_count", 0)), pct(stats.get("win_rate")),
+                         pct(mc.get("win_rate_p05")), num(mc.get("terminal_r_p05"))])
+    adv_table = Table(adv_rows, repeatRows=1)
+    adv_table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#243447")),
+                                   ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                                   ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                                   ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                   ("FONTSIZE", (0, 0), (-1, -1), 7),
+                                   ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#edf2f7")])]))
+    story.extend([adv_table, Spacer(1, 10),
+                  Paragraph("Bayes se ajusta únicamente con operaciones de entrenamiento anteriores; en OOS exige al menos "
+                            "30 coincidencias y límite inferior Wilson 95% ≥70%. Monte Carlo usa remuestreo con reemplazo "
+                            "de operaciones para cuantificar incertidumbre, no para prometer resultados futuros. La FFT y "
+                            "Hurst son diagnósticos ruidosos y no se consideran predicciones garantizadas.", styles["BodyText"]),
+                  Spacer(1, 8),
+                  Paragraph("Regla de seguridad: si no supera todos los filtros y no hay costes realistas, NO_TRADE.", styles["Heading3"])])
     doc.build(story)
 
 
