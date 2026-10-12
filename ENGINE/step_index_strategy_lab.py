@@ -215,14 +215,22 @@ def main() -> None:
     out = Path(os.getenv("SQAO_DATA_DIR", "DATA"))
     out.mkdir(parents=True, exist_ok=True)
     json_path, pdf_path = out / "step_index_strategy_lab.json", out / "step_index_strategy_lab.pdf"
-    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+    def json_safe(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if isinstance(value, dict):
+            return {k: json_safe(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [json_safe(v) for v in value]
+        return value
+    json_path.write_text(json.dumps(json_safe(report), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     write_pdf(report, pdf_path)
     print(json.dumps({"symbol": report["symbol"], "decision": report["decision"],
                       "strategies": [{"name": x["strategy"], "oos_n": x["oos_n"],
                                       "win_rate": x["oos_net"]["win_rate"],
                                       "expectancy_r": x["oos_net"]["expectancy_r"],
                                       "profit_factor": x["oos_net"]["profit_factor"],
-                                      "eligible": x["gate"]["eligible"]} for x in report["strategies"],
+                                      "eligible": x["gate"]["eligible"]} for x in report["strategies"]],
                       "pdf": str(pdf_path), "json": str(json_path)}, ensure_ascii=False, indent=2))
 
 
