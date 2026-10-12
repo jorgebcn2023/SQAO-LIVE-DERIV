@@ -11,6 +11,7 @@ on:
       - 'GPT/**'
       - 'SCRIPTS/**'
       - '.github/workflows/sqao-complete-os-package.yml'
+      - '.github/workflows/step-index-quant.yml'
       - 'README.md'
       - 'START-SQAO.sh'
       - 'RUN-CODESPACE.sh'
