@@ -565,15 +565,49 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     doc.build(story)
 
 
+def aggregate_weekly_from_daily(rows: list[dict[str, Any]], now_epoch: int | None = None) -> list[dict[str, Any]]:
+    """Aggregate closed daily candles into complete UTC Monday-Sunday candles.
+
+    This avoids relying on broker support for a 604800-second candle interval.
+    """
+    now = int(now_epoch if now_epoch is not None else datetime.now(timezone.utc).timestamp())
+    groups: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        ts = int(row["epoch"])
+        dt = datetime.fromtimestamp(ts, timezone.utc)
+        monday = datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
+        monday_epoch = int(monday.timestamp()) - monday.weekday() * GRANULARITY["D1"]
+        groups.setdefault(monday_epoch, []).append(row)
+    out = []
+    for week_start in sorted(groups):
+        # Require the full seven-day UTC week to have elapsed.
+        if week_start + GRANULARITY["W1"] > now:
+            continue
+        week = sorted(groups[week_start], key=lambda x: int(x["epoch"]))
+        if not week:
+            continue
+        out.append({
+            "epoch": week_start,
+            "open": float(week[0]["open"]),
+            "high": max(float(x["high"]) for x in week),
+            "low": min(float(x["low"]) for x in week),
+            "close": float(week[-1]["close"]),
+        })
+    return out
+
+
 async def run_research() -> dict[str, Any]:
     symbol = await discover_step_index()
     frames: dict[str, list[dict[str, Any]]] = {}
     counts = {tf: int(os.getenv(f"SQAO_STEP_CANDLES_{tf}", str(n))) for tf, n in DEFAULT_COUNTS.items()}
-    tasks = {tf: fetch_candles(symbol["symbol"], tf, counts[tf]) for tf in counts}
+    # W1 is aggregated from D1 so the pipeline does not depend on provider weekly granularity support.
+    requested_frames = {tf: n for tf, n in counts.items() if tf != "W1"}
+    tasks = {tf: fetch_candles(symbol["symbol"], tf, requested_frames[tf]) for tf in requested_frames}
     raw = await asyncio.gather(*tasks.values())
     now = int(datetime.now(timezone.utc).timestamp())
     for tf, rows in zip(tasks.keys(), raw):
         frames[tf] = closed_candles(rows, tf, now)
+    frames["W1"] = aggregate_weekly_from_daily(frames.get("D1", []), now)
     for tf in ("M5", "M15", "H1"):
         if len(frames[tf]) < 100:
             raise RuntimeError(f"Insufficient closed OHLC candles for {tf}: {len(frames[tf])}")
