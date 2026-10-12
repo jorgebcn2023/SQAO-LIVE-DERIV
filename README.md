@@ -91,3 +91,24 @@ python -m ENGINE.test_step_index_quant
 ```
 
 **Important:** the 70% figure is an acceptance threshold, never a guaranteed result or the probability of the next trade. This helper analyzes supplied closed-trade R multiples and close prices; it does not by itself perform a live Step Index backtest. Use clean chronological out-of-sample OHLC data and realistic spread/commission/slippage inputs before evaluating any strategy. If the evidence gate fails, the correct output is `NO_TRADE`.
+
+
+## Step Index research pipeline (end-to-end)
+
+Run a Step Index-specific, read-only historical analysis and generate a reproducible executive PDF plus JSON:
+
+```bash
+python -m ENGINE.step_index_research
+```
+
+The pipeline discovers the actual active Step Index symbol from Deriv's public API (does not silently substitute another instrument), retrieves closed candles in paginated blocks, and reports M1/M5/M15/H1/D1/W1 indicators: EMA10/20, RSI14, ATR14, MACD(12,26,9), Bollinger(20,2), stochastic and rolling-range Fibonacci levels. Fibonacci values are range estimates, not confirmed pivot levels.
+
+The baseline research rule is fixed before evaluation: M5 close breakout of the prior 20-candle high/low plus EMA10/20 direction, filtered by matching EMA10/20 direction on already-closed M15 and H1 candles. The simulated entry is the next M5 open, stop distance is 1.2 ATR, target is 1.5R, horizon is five M5 bars, and ambiguous same-bar stop/target events count as stop-first. It uses a chronological 70/30 train/holdout split and includes subperiod breakdowns, log-return distribution, confidence intervals, drawdown, expectancy, profit factor and a hypothetical equity curve.
+
+Outputs:
+- `DATA/step_index_quant_report.pdf`
+- `DATA/step_index_quant_report.json`
+
+GitHub Actions workflow `.github/workflows/step-index-quant.yml` runs every six hours, supports manual dispatch, and uploads both outputs as a 30-day artifact. Configure repository Actions variable `SQAO_STEP_ROUND_TRIP_COST_PRICE` with a realistic total round-trip cost in quote-price units. Without that value, cost-adjusted eligibility is intentionally blocked and the result remains `NO_TRADE`.
+
+This baseline does not claim a 70% future hit rate. The statistical gate needs at least 100 OOS trades, observed win rate >=70%, Wilson 95% lower bound >=70%, positive net expectancy, profit factor >1 and declared transaction costs. Passing the gate only makes a candidate eligible for further review; it does not guarantee the next trade and does not by itself authorize execution. No order-placement API is used.
