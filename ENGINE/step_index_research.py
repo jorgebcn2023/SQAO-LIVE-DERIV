@@ -440,13 +440,16 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                               textColor=colors.HexColor("#17657A"), spaceBefore=4, spaceAfter=3))
     styles.add(ParagraphStyle(name="SQBody", parent=styles["BodyText"], fontSize=8, leading=10, spaceAfter=4))
     styles.add(ParagraphStyle(name="SQSmall", parent=styles["BodyText"], fontSize=6.8, leading=8, spaceAfter=2))
+    styles.add(ParagraphStyle(name="SQSmallHeader", parent=styles["BodyText"], fontName="Helvetica-Bold",
+                              fontSize=6.8, leading=8, textColor=colors.white, spaceAfter=2))
     styles.add(ParagraphStyle(name="SQAlert", parent=styles["BodyText"], fontSize=9, leading=12,
                               textColor=colors.HexColor("#7D2828"), borderColor=colors.HexColor("#D8A0A0"),
                               borderWidth=.7, borderPadding=6, spaceBefore=4, spaceAfter=7))
     def p(text: str, style: str = "SQBody"):
         return Paragraph(text, styles[style])
     def table(rows: list[list[Any]], widths: list[float]):
-        cells = [[Paragraph(str(c), styles["SQSmall"]) for c in row] for row in rows]
+        cells = [[Paragraph(str(c), styles["SQSmallHeader"] if row_index == 0 else styles["SQSmall"])
+                  for c in row] for row_index, row in enumerate(rows)]
         tb = Table(cells, colWidths=widths, repeatRows=1)
         tb.setStyle(TableStyle([
             ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#17324D")),
@@ -485,7 +488,8 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     story = [
         Spacer(1, .35*cm),
         p("SQAO · STEP INDEX QUANT RESEARCH", "SQTitle"),
-        p(f"Informe técnico ejecutivo · generado {report['generated_at_utc']} · fuente Deriv public OHLC", "SQSub"),
+        p(f"Instrumento: {report['symbol'].get('display_name', report['symbol'].get('symbol', 'Step Index'))} "
+          f"({report['symbol'].get('symbol', 'n/d')}) · generado {report['generated_at_utc']} · fuente Deriv public OHLC", "SQSub"),
         p(f"DICTAMEN OPERATIVO: {report['decision']}", "SQH1"),
         p(f"Puerta estadística histórica: {gate['decision']} · setup M5 actual: {setup.get('state', 'n/d')}", "SQBody"),
         p("No se ha validado una efectividad del 70% para la próxima operación. El umbral se aplica exclusivamente a una muestra cronológica fuera de muestra con costes reales declarados. Si los criterios no se cumplen, la decisión se mantiene en NO_TRADE.", "SQAlert"),
