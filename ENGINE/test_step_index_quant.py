@@ -62,10 +62,10 @@ def test_log_distribution_is_finite():
 
 def test_signal_uses_prior_bars_only():
     rows = []
-    for i in range(25):
+    for i in range(40):
         p = 100 + i * 0.1
         rows.append({"epoch": i * 300, "open": p, "high": p + 0.05, "low": p - 0.05, "close": p})
-    rows.append({"epoch": 7500, "open": 103, "high": 104, "low": 102.9, "close": 103.5})
+    rows.append({"epoch": 12000, "open": 104, "high": 105, "low": 103.9, "close": 104.5})
     assert signal_m5(rows) == "LONG"
 
 
