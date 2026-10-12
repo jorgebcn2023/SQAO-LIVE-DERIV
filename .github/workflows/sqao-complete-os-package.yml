@@ -54,6 +54,7 @@ jobs:
           python -m ENGINE.test_step_index_quant
           python -m ENGINE.test_step_index_strategy_lab
           python -m ENGINE.test_step_index_advanced
+          python -m ENGINE.test_step_index_cost_sensitivity
       - name: Build complete OS ZIP
         env:
           PACKAGE_SHA: ${{ github.sha }}
