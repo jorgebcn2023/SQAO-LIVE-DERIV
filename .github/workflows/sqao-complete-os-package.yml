@@ -1,0 +1,97 @@
+name: SQAO Complete OS Package
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ENGINE/**'
+      - 'API/**'
+      - 'AI/**'
+      - 'CONNECTOR/**'
+      - 'GPT/**'
+      - 'SCRIPTS/**'
+      - '.github/workflows/sqao-complete-os-package.yml'
+      - 'README.md'
+      - 'START-SQAO.sh'
+      - 'RUN-CODESPACE.sh'
+permissions:
+  contents: read
+concurrency:
+  group: sqao-complete-os-package
+  cancel-in-progress: true
+jobs:
+  validate-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ENGINE/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r ENGINE/requirements.txt -r API/requirements.txt
+      - name: Compile and test
+        run: |
+          python -m compileall -q API AI ENGINE CONNECTOR
+          python -m ENGINE.tests
+          python -m ENGINE.test_step_index_quant
+          python -m ENGINE.test_step_index_strategy_lab
+      - name: Build complete OS ZIP
+        env:
+          PACKAGE_SHA: ${{ github.sha }}
+          PACKAGE_RUN: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          root = Path('.').resolve()
+          out = root / 'DIST'
+          out.mkdir(exist_ok=True)
+          package = out / 'SQAO_LIVE_DERIV_COMPLETE_OS_GITHUB.zip'
+          excluded_parts = {'.git', '.venv', 'venv', '__pycache__', '.pytest_cache', 'node_modules', 'DIST'}
+          excluded_names = {'.env', '.env.local', '.env.production', 'secrets.json', 'credentials.json'}
+          included = []
+          with zipfile.ZipFile(package, 'w', zipfile.ZIP_DEFLATED, compresslevel=8) as z:
+              for p in sorted(root.rglob('*')):
+                  if not p.is_file() or any(part in excluded_parts for part in p.relative_to(root).parts):
+                      continue
+                  if p.name in excluded_names or p.suffix in {'.pyc', '.pyo'}:
+                      continue
+                  if p.relative_to(root).parts[0] == 'DATA':
+                      continue
+                  rel = p.relative_to(root).as_posix()
+                  z.write(p, rel)
+                  included.append(rel)
+              manifest = {
+                'package': package.name,
+                'repository': 'jorgebcn2023/SQAO-LIVE-DERIV',
+                'commit_sha': os.environ['PACKAGE_SHA'],
+                'workflow_run_id': os.environ['PACKAGE_RUN'],
+                'created_by': 'GitHub Actions',
+                'files': included,
+                'safety': 'Research/read-only; no order placement; secrets and runtime DATA excluded.'
+              }
+              z.writestr('PACKAGE_MANIFEST.json', json.dumps(manifest, indent=2))
+          print(f'PACKAGE_OK file={package} files={len(included)} bytes={package.stat().st_size}')
+          PY
+      - name: Upload complete OS ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqao-live-deriv-complete-os
+          path: DIST/SQAO_LIVE_DERIV_COMPLETE_OS_GITHUB.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload research artifacts when available
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqao-live-deriv-research-source
+          path: |
+            DATA/step_index_quant_report.pdf
+            DATA/step_index_quant_report.json
+            DATA/step_index_strategy_lab.pdf
+            DATA/step_index_strategy_lab.json
+          if-no-files-found: ignore
+          retention-days: 30
