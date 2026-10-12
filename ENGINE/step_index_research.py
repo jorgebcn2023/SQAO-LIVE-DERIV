@@ -464,6 +464,19 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     s = oos["stats_net"]
     gate = oos["gate"]
     setup = report.get("current_setup", {})
+    costs_supplied = report["backtest"]["parameters"]["round_trip_cost_price"] is not None
+    metric_basis = "neto tras coste declarado" if costs_supplied else "bruto, antes de costes"
+    expectancy_label = "Expectativa neta" if costs_supplied else "Expectativa bruta"
+    winrate_label = "Win rate neto" if costs_supplied else "Win rate bruto"
+    pf_label = "PF neto" if costs_supplied else "PF bruto"
+    setup_state = setup.get("state", "n/d")
+    if setup_state == "NO_CURRENT_TRIGGER":
+        setup_state = "NO TRIGGER"
+    cost_display = str(report["backtest"]["parameters"]["round_trip_cost_price"]) if costs_supplied else "NO CONFIGURADO"
+    gate_warning = ("No se ha validado una efectividad del 70% para la próxima operación. El umbral solo se aplica a una muestra cronológica fuera de muestra."
+                    " Si los criterios no se cumplen, la decisión se mantiene en NO_TRADE.")
+    if not costs_supplied:
+        gate_warning += " Los costes round-trip no están configurados; los resultados de rentabilidad son brutos, antes de costes."
     pct = lambda x: "n/d" if x is None else f"{x * 100:.2f}%"
     num = lambda x, d=3: "n/d" if x is None else f"{x:.{d}f}"
     chart = Drawing(470, 150)
@@ -491,18 +504,18 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         p(f"Instrumento: {report['symbol'].get('display_name', report['symbol'].get('symbol', 'Step Index'))} "
           f"({report['symbol'].get('symbol', 'n/d')}) · generado {report['generated_at_utc']} · fuente Deriv public OHLC", "SQSub"),
         p(f"DICTAMEN OPERATIVO: {report['decision']}", "SQH1"),
-        p(f"Puerta estadística histórica: {gate['decision']} · setup M5 actual: {setup.get('state', 'n/d')}", "SQBody"),
-        p("No se ha validado una efectividad del 70% para la próxima operación. El umbral se aplica exclusivamente a una muestra cronológica fuera de muestra con costes reales declarados. Si los criterios no se cumplen, la decisión se mantiene en NO_TRADE.", "SQAlert"),
+        p(f"Puerta estadística histórica: {gate['decision']} · setup M5 actual: {setup_state}", "SQBody"),
+        p(gate_warning, "SQAlert"),
         p("1. Resultado ejecutivo", "SQH1"),
         table([
-            ["Indicador OOS neto","Resultado","Criterio"],
+            [f"Indicadores OOS {metric_basis}","Resultado","Criterio"],
             ["Operaciones fuera de muestra",str(s["n"]),"≥ 100"],
             ["Tasa de acierto",pct(s["win_rate"]),"≥ 70% observado"],
             ["IC Wilson 95%",f"{pct(s['wilson_95_low'])} – {pct(s['wilson_95_high'])}","Límite inferior ≥ 70%"],
-            ["Expectativa neta",f"{num(s['expectancy_r'])} R/trade","> 0"],
+            [expectancy_label,f"{num(s['expectancy_r'])} R/trade","> 0"],
             ["Profit factor",num(s["profit_factor"]),"> 1"],
             ["Drawdown máximo",f"{num(s['max_drawdown_r'])} R","Control de riesgo"],
-            ["Coste round-trip",str(report["backtest"]["parameters"]["round_trip_cost_price"]),"Debe ser proporcionado en unidades de precio"],
+            ["Coste round-trip",cost_display,"Debe estar configurado para afirmar resultados netos"],
         ], [4.6*cm,4.2*cm,6.0*cm]),
         Spacer(1,5),
         p("2. Resumen de marcos temporales", "SQH1"),
@@ -524,7 +537,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         p("3. Escenario de scalping actual (condicional; no es una orden)", "SQH1"),
         table([
             ["Estado","Dirección","Precio de referencia","Stop orientativo","Objetivo orientativo","R:R"],
-            [setup.get("state","n/d"), setup.get("direction","n/d"),
+            [setup_state, setup.get("direction","n/d"),
              num(setup.get("reference_price"),2), num(setup.get("stop_reference"),2),
              num(setup.get("target_reference"),2), num(setup.get("target_R"),2)]
         ], [3.0*cm,2.0*cm,2.8*cm,2.8*cm,3.0*cm,1.4*cm]),
@@ -532,7 +545,8 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         p("4. Metodología y prevención de sesgo", "SQH1"),
         p(report["backtest"]["rule"], "SQBody"),
         p("La señal se determina al cierre de M5. EMA10/20 de M15 y H1 solo usan velas ya cerradas a la hora de decisión. La entrada de simulación se realiza en la apertura de la siguiente vela M5. Si stop y objetivo aparecen tocados en la misma vela, se contabiliza primero el stop. Las últimas velas incompletas quedan excluidas.", "SQBody"),
-        p("4. Estadística y logaritmos", "SQH1"),
+        p("Cálculos: retorno logarítmico = ln(C[t] / C[t-1]); expectativa = media de R por operación; profit factor = suma de R positivos / valor absoluto de la suma de R negativos; drawdown = máxima caída desde un máximo previo; tasa de acierto con intervalo Wilson bilateral del 95%.", "SQBody"),
+        p("5. Estadística y logaritmos", "SQH1"),
         table([
             ["Métrica","Valor"],
             ["n retornos logarítmicos M5",report["log_distribution_m5"]["n"]],
@@ -541,23 +555,23 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
             ["Asimetría",num(report["log_distribution_m5"]["skew"],4)],
             ["Exceso de curtosis",num(report["log_distribution_m5"]["excess_kurtosis"],4)],
             ["Retorno geométrico acumulado",pct(report["log_distribution_m5"]["geometric_return_fraction"])],
-            ["Expectativa OOS neta",f"{num(s['expectancy_r'])} R"],
+            [f"{expectancy_label} OOS",f"{num(s['expectancy_r'])} R"],
             ["Sharpe por operación (sin anualizar)",num(s["sharpe_per_trade_not_annualized"])],
             ["Sortino por operación (sin anualizar)",num(s["sortino_per_trade_not_annualized"])],
         ], [6.0*cm,9.0*cm]),
-        p("5. Curva de capital fuera de muestra", "SQH1"),
+        p("6. Curva de capital fuera de muestra", "SQH1"),
         chart,
-        p("6. Estabilidad por subperiodos cronológicos", "SQH1"),
-        table([["Bloque OOS","Operaciones","Win rate neto","Expectativa neta (R)","PF neto"]] + [
+        p("7. Estabilidad por subperiodos cronológicos", "SQH1"),
+        table([["Bloque OOS","Operaciones",winrate_label, f"{expectancy_label} (R)",pf_label]] + [
             [fold["fold"], fold["stats_net"]["n"], pct(fold["stats_net"]["win_rate"]),
              num(fold["stats_net"]["expectancy_r"]), num(fold["stats_net"]["profit_factor"])]
             for fold in oos.get("subperiods", [])
         ], [2.3*cm,2.8*cm,3.0*cm,3.8*cm,2.8*cm]),
-        p("7. Regla de aceptación", "SQH1"),
+        p("8. Regla de aceptación", "SQH1"),
         p("Se requiere simultáneamente tamaño de muestra suficiente, win rate observado ≥ objetivo, límite inferior de Wilson 95% ≥ objetivo, expectativa neta positiva, profit factor > 1 y costes declarados. La superación habilita revisión adicional; no garantiza rentabilidad futura ni constituye una probabilidad predictiva calibrada.", "SQBody"),
-        p("8. Limitaciones", "SQH1"),
+        p("9. Limitaciones", "SQH1"),
         p("Esta estrategia es un baseline mecánico (ruptura de 20 velas + EMA10/20 + filtros M15/H1), no una optimización del algoritmo de Step Index. El resultado depende del histórico disponible, el régimen de mercado, el coste comunicado y la fidelidad del modelo de ejecución. No hay conexión de órdenes ni ejecución real.", "SQBody"),
-        p("9. Conclusión", "SQH1"),
+        p("10. Conclusión", "SQH1"),
         p(f"Decisión operativa del motor: {report['decision']}. Puerta histórica elegible: {gate['eligible']}. Si no se cumplen todos los filtros o los costes no se han definido, no se emite una operación activa.", "SQAlert"),
     ]
     doc = SimpleDocTemplate(str(path), pagesize=A4, rightMargin=1.4*cm, leftMargin=1.4*cm,
