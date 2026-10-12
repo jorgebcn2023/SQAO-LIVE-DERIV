@@ -1,0 +1,7 @@
+SQAO-LIVE-DERIV COMPLETE OS PACKAGE
+Version: 2026-10-12
+Source: main branch of jorgebcn2023/SQAO-LIVE-DERIV
+Package workflow: .github/workflows/sqao-complete-os-package.yml
+Research workflow: .github/workflows/step-index-quant.yml
+Includes fixed-candidate strategy lab, tests, GPT runbook and GitHub Actions packaging.
+Read-only research system; no order placement.
