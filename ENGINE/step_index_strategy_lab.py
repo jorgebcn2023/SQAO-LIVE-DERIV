@@ -19,6 +19,10 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from .step_index_quant import acceptance_gate, equity_stats
+from .step_index_advanced import (
+    bayesian_probability, calculate_hurst, condition_key, fft_cycle,
+    fisher_transform, hurst_regime, monte_carlo_trade_bootstrap, squeeze_state,
+)
 from .step_index_research import (
     GRANULARITY, atr_series, closed_candles, discover_step_index, ema_series,
     fetch_candles, rsi, _trend_cache, _cached_trend_at,
@@ -120,9 +124,23 @@ def evaluate_strategy(
                 move = (float(m5[j]["close"]) - entry) * (1 if direction == "LONG" else -1)
                 gross_r = max(-1.0, min(rr, move / risk))
         cost_r = float(round_trip_cost_price) / risk if round_trip_cost_price is not None else 0.0
+        # Features use only candles at or before the signal candle; future outcomes are labels only.
+        start = max(0, i - 255)
+        recent_closes = closes[start:i + 1]
+        h_value = calculate_hurst(recent_closes)
+        fft = fft_cycle(closes[max(0, i - 199):i + 1], min_period=8, max_period=100)
+        fisher_series = fisher_transform(
+            [float(x["high"]) for x in m5[max(0, i - 40):i + 1]],
+            [float(x["low"]) for x in m5[max(0, i - 40):i + 1]], length=9)
+        f_value = next((v for v in reversed(fisher_series) if v is not None), None)
+        sq = squeeze_state(m5[max(0, i - 41):i + 1])
+        feature_state = {"hurst": h_value, "fisher": f_value,
+                         "squeeze_release": sq.get("release"),
+                         "direction": direction}
         trades.append({"signal_epoch": decision_epoch, "direction": direction, "entry": entry,
                        "risk_price": risk, "gross_r": gross_r, "cost_r": cost_r,
                        "net_r": gross_r - cost_r, "exit_reason": exit_reason,
+                       "features": feature_state, "fft_cycle": fft, "squeeze": sq,
                        "sample": "train" if i < split else "out_of_sample"})
         next_allowed = last_j + 1
     train = [t for t in trades if t["sample"] == "train"]
@@ -132,10 +150,24 @@ def evaluate_strategy(
     gate = acceptance_gate(net, min_trades=int(os.getenv("SQAO_STEP_MIN_OOS_TRADES", "100")),
                            target_win_rate=float(os.getenv("SQAO_STEP_TARGET_WIN_RATE", "0.70")),
                            require_costs=True, costs_supplied=round_trip_cost_price is not None)
+    # Bayesian conditional estimate is fitted strictly on the earlier training segment.
+    training_samples = [{"features": t["features"], "net_r": t["net_r"]} for t in train]
+    for trade in oos:
+        trade["bayesian"] = bayesian_probability(training_samples, trade["features"], min_samples=30)
+    gated = [t for t in oos if t["bayesian"]["threshold_pass"]]
+    gated_stats = equity_stats([t["net_r"] for t in gated])
+    oos_mc = monte_carlo_trade_bootstrap([t["net_r"] for t in oos], paths=10000)
+    gated_mc = monte_carlo_trade_bootstrap([t["net_r"] for t in gated], paths=10000) if len(gated) >= 2 else {
+        "available": False, "reason": "fewer_than_two_bayesian_qualified_trades"}
     return {"strategy": name, "parameters": {"train_fraction": train_fraction, "horizon_m5": horizon,
             "target_R": rr, "stop_ATR": atr_mult, "round_trip_cost_price": round_trip_cost_price},
             "n_trades_total": len(trades), "train_n": len(train), "oos_n": len(oos),
-            "oos_gross": gross, "oos_net": net, "gate": gate, "trades": trades}
+            "oos_gross": gross, "oos_net": net, "gate": gate,
+            "advanced_bayesian_oos": {"candidate_count": len(oos), "qualified_count": len(gated),
+                "qualified_stats": gated_stats, "qualified_monte_carlo": gated_mc,
+                "qualification_rule": "training-only Bayesian condition bins; >=30 matching train trades and Wilson 95% lower bound >=70%",
+                "note": "Selection is not evidence of a 70% future win rate; sparse matches correctly yield no trade."},
+            "oos_monte_carlo": oos_mc, "trades": trades}
 
 
 def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str],
@@ -152,11 +184,24 @@ def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str]
         x["oos_net"]["profit_factor"] if x["oos_net"]["profit_factor"] is not None else -math.inf,
     ), reverse=True)
     eligible = next((x for x in candidates if x["gate"]["eligible"]), None)
+    closes = [float(r["close"]) for r in m5]
+    h5 = calculate_hurst(closes[-256:])
+    f_series = fisher_transform([float(r["high"]) for r in m5[-40:]],
+                                [float(r["low"]) for r in m5[-40:]], length=9)
+    current_fisher = next((v for v in reversed(f_series) if v is not None), None)
+    sq = squeeze_state(m5[-41:])
+    cycle = fft_cycle(closes[-200:], min_period=8, max_period=100)
     return {"generated_at_utc": datetime.now(timezone.utc).isoformat(), "symbol": symbol,
             "read_only": True, "decision": "CANDIDATE_FOR_REVIEW" if eligible else "NO_TRADE",
             "selection_rule": "Eligibility gate first, then OOS expectancy and profit factor; no tuning on holdout.",
+            "advanced_snapshot": {"hurst_m5": h5, "hurst_regime_m5": hurst_regime(h5),
+                "fisher_m5": current_fisher, "fft_cycle_m5": cycle, "squeeze_m5": sq,
+                "features_are_diagnostics_not_standalone_signals": True},
             "strategies": candidates,
             "limitations": ["Small fixed candidate set; results are not proof of future performance.",
+                           "Bayesian probabilities are trained only on the chronological training segment and require sufficient matching samples.",
+                           "FFT and Hurst estimates are noisy diagnostics; cycle phase is not treated as a guaranteed forecast.",
+                           "Monte Carlo bootstrap quantifies sampling uncertainty, not future certainty.",
                            "No candidate is eligible without realistic round-trip costs.",
                            "No order placement or live trading is implemented."]}
 
