@@ -9,6 +9,8 @@ on:
     paths:
       - 'ENGINE/step_index_quant.py'
       - 'ENGINE/step_index_research.py'
+      - 'ENGINE/step_index_strategy_lab.py'
+      - 'ENGINE/step_index_arima_mc.py'
       - 'ENGINE/test_step_index_quant.py'
       - 'ENGINE/requirements.txt'
       - '.github/workflows/step-index-quant.yml'
@@ -23,7 +25,7 @@ concurrency:
 jobs:
   step-index-quant:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -58,7 +60,6 @@ jobs:
           SQAO_STEP_TRAIN_FRACTION: '0.70'
           SQAO_STEP_MIN_OOS_TRADES: '100'
           SQAO_STEP_TARGET_WIN_RATE: '0.70'
-          # Intentionally not defaulted: supply realistic total round-trip costs via repository Actions variables/secrets.
           SQAO_STEP_ROUND_TRIP_COST_PRICE: ${{ vars.SQAO_STEP_ROUND_TRIP_COST_PRICE }}
           SQAO_DATA_DIR: DATA
         run: python -m ENGINE.step_index_research
@@ -75,39 +76,50 @@ jobs:
           SQAO_DATA_DIR: DATA
         run: python -m ENGINE.step_index_strategy_lab
 
+      - name: Run ARIMA and 10,000-path Monte Carlo
+        env:
+          DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
+          SQAO_ARIMA_SYMBOL: stpRNG
+          SQAO_ARIMA_CANDLES: '5000'
+          SQAO_ARIMA_GRANULARITY: '300'
+          SQAO_ARIMA_HORIZON: '5'
+          SQAO_MC_PATHS: '10000'
+          SQAO_DATA_DIR: DATA
+        run: python -m ENGINE.step_index_arima_mc
+
       - name: Validate JSON and PDF outputs
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           data = json.loads(Path('DATA/step_index_quant_report.json').read_text(encoding='utf-8'))
-          pdf = Path('DATA/step_index_quant_report.pdf')
           lab = json.loads(Path('DATA/step_index_strategy_lab.json').read_text(encoding='utf-8'))
-          lab_pdf = Path('DATA/step_index_strategy_lab.pdf')
-          if not pdf.is_file() or pdf.stat().st_size < 5000:
-              raise SystemExit('Baseline PDF report missing or unexpectedly small')
-          if not lab_pdf.is_file() or lab_pdf.stat().st_size < 1000:
-              raise SystemExit('Strategy lab PDF missing or unexpectedly small')
+          am = json.loads(Path('DATA/step_index_arima_mc.json').read_text(encoding='utf-8'))
+          for name in ['step_index_quant_report.pdf','step_index_strategy_lab.pdf','step_index_arima_mc.pdf']:
+              if not Path('DATA', name).is_file() or Path('DATA', name).stat().st_size < 1000:
+                  raise SystemExit(f'Missing/invalid PDF: {name}')
           if data.get('decision') not in {'NO_TRADE', 'CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION'}:
               raise SystemExit('Unexpected baseline decision state')
           if lab.get('decision') not in {'NO_TRADE', 'CANDIDATE_FOR_REVIEW'} or len(lab.get('strategies', [])) != 3:
               raise SystemExit('Strategy lab output invalid')
-          print('STEP_INDEX_QUANT_REPORT_OK', 'symbol=', data['symbol']['symbol'],
-                'decision=', data['decision'],
-                'oos_trades=', data['backtest']['out_of_sample']['n_trades'],
-                'win_rate=', data['backtest']['out_of_sample']['stats_net']['win_rate'])
-          print('STEP_INDEX_STRATEGY_LAB_OK', 'decision=', lab['decision'],
-                'strategies=', len(lab['strategies']))
+          if am.get('decision') not in {'NO_TRADE','LONG','SHORT','WAIT'} or am.get('monte_carlo',{}).get('paths') != 10000:
+              raise SystemExit('ARIMA/Monte Carlo output invalid')
+          print('ARIMA_MC_OK', am['decision'], 'ARIMA=', am['arima']['order'], 'P_UP=', am['monte_carlo']['probability_terminal_up'])
           PY
 
-      - name: Upload reproducible report artifact
+      - name: Upload reproducible report artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sqao-step-index-quant-${{ github.run_number }}
+          name: sqao-step-index-arima-mc-${{ github.run_number }}
           path: |
             DATA/step_index_quant_report.pdf
             DATA/step_index_quant_report.json
             DATA/step_index_strategy_lab.pdf
             DATA/step_index_strategy_lab.json
+            DATA/step_index_arima_mc.pdf
+            DATA/step_index_arima_mc.json
+            DATA/step_index_mc_paths.png
+            DATA/step_index_mc_distribution.png
+            DATA/step_index_arima_oos.png
           if-no-files-found: error
           retention-days: 30
