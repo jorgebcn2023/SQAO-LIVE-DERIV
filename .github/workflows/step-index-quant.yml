@@ -63,6 +63,18 @@ jobs:
           SQAO_DATA_DIR: DATA
         run: python -m ENGINE.step_index_research
 
+      - name: Run alternative Step Index strategy lab
+        env:
+          DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
+          SQAO_LAB_M5_CANDLES: '20000'
+          SQAO_LAB_M15_CANDLES: '7000'
+          SQAO_LAB_H1_CANDLES: '2500'
+          SQAO_STEP_MIN_OOS_TRADES: '100'
+          SQAO_STEP_TARGET_WIN_RATE: '0.70'
+          SQAO_STEP_ROUND_TRIP_COST_PRICE: ${{ vars.SQAO_STEP_ROUND_TRIP_COST_PRICE }}
+          SQAO_DATA_DIR: DATA
+        run: python -m ENGINE.step_index_strategy_lab
+
       - name: Validate JSON and PDF outputs
         run: |
           python - <<'PY'
@@ -70,14 +82,22 @@ jobs:
           from pathlib import Path
           data = json.loads(Path('DATA/step_index_quant_report.json').read_text(encoding='utf-8'))
           pdf = Path('DATA/step_index_quant_report.pdf')
+          lab = json.loads(Path('DATA/step_index_strategy_lab.json').read_text(encoding='utf-8'))
+          lab_pdf = Path('DATA/step_index_strategy_lab.pdf')
           if not pdf.is_file() or pdf.stat().st_size < 5000:
-              raise SystemExit('PDF report missing or unexpectedly small')
+              raise SystemExit('Baseline PDF report missing or unexpectedly small')
+          if not lab_pdf.is_file() or lab_pdf.stat().st_size < 3000:
+              raise SystemExit('Strategy lab PDF missing or unexpectedly small')
           if data.get('decision') not in {'NO_TRADE', 'CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION'}:
-              raise SystemExit('Unexpected decision state')
+              raise SystemExit('Unexpected baseline decision state')
+          if lab.get('decision') not in {'NO_TRADE', 'CANDIDATE_FOR_REVIEW'} or len(lab.get('strategies', [])) != 3:
+              raise SystemExit('Strategy lab output invalid')
           print('STEP_INDEX_QUANT_REPORT_OK', 'symbol=', data['symbol']['symbol'],
                 'decision=', data['decision'],
                 'oos_trades=', data['backtest']['out_of_sample']['n_trades'],
                 'win_rate=', data['backtest']['out_of_sample']['stats_net']['win_rate'])
+          print('STEP_INDEX_STRATEGY_LAB_OK', 'decision=', lab['decision'],
+                'strategies=', len(lab['strategies']))
           PY
 
       - name: Upload reproducible report artifact
@@ -87,5 +107,7 @@ jobs:
           path: |
             DATA/step_index_quant_report.pdf
             DATA/step_index_quant_report.json
+            DATA/step_index_strategy_lab.pdf
+            DATA/step_index_strategy_lab.json
           if-no-files-found: error
           retention-days: 30
