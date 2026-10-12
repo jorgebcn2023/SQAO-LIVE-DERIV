@@ -236,12 +236,16 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     snap = report.get("advanced_snapshot", {})
     cycle = snap.get("fft_cycle_m5", {})
     sq = snap.get("squeeze_m5", {})
+    fmt_diag = lambda value, digits=3: (
+        "N/D" if value is None or not math.isfinite(float(value)) else f"{float(value):.{digits}f}"
+    )
     story.append(Paragraph(
-        f"Hurst M5: {snap.get('hurst_m5')} ({snap.get('hurst_regime_m5')}); "
-        f"Fisher M5: {snap.get('fisher_m5')}; "
-        f"FFT periodo dominante: {cycle.get('dominant_period_bars') if cycle.get('available') else 'N/D'} velas; "
-        f"Squeeze: {sq.get('squeeze')}; liberación: {sq.get('release')}; "
-        f"confirmación de volumen: {sq.get('volume_confirmed')}.",
+        f"Hurst M5: {fmt_diag(snap.get('hurst_m5'))} ({snap.get('hurst_regime_m5', 'UNKNOWN')}); "
+        f"Fisher M5: {fmt_diag(snap.get('fisher_m5'))}; "
+        f"FFT periodo dominante: {fmt_diag(cycle.get('dominant_period_bars'), 1) if cycle.get('available') else 'N/D'} velas; "
+        f"Squeeze: {sq.get('squeeze') if sq.get('available') else 'N/D'}; "
+        f"liberación: {sq.get('release') if sq.get('available') else 'N/D'}; "
+        f"confirmación de volumen: {sq.get('volume_confirmed') if sq.get('volume_confirmed') is not None else 'N/D'}.",
         styles["BodyText"]))
     story.append(Spacer(1, 8))
     adv_rows = [["Estrategia", "OOS candidatos", "Bayes pasa filtro", "Acierto filtrado", "MC P05 win rate", "MC P05 equity R"]]
