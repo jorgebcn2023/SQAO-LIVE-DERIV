@@ -90,7 +90,14 @@ jobs:
                 'safety': 'Research/read-only; no order placement; secrets and runtime DATA excluded.'
               }
               z.writestr('PACKAGE_MANIFEST.json', json.dumps(manifest, indent=2))
-          print(f'PACKAGE_OK file={package} files={len(included)} bytes={package.stat().st_size}')
+          # Validate the manifest from the actual checkout, not a stale/local SHA.
+          with zipfile.ZipFile(package) as z:
+              built = json.loads(z.read('PACKAGE_MANIFEST.json'))
+          if built.get('commit_sha') != os.environ['PACKAGE_SHA']:
+              raise SystemExit('Manifest commit SHA does not match workflow checkout SHA')
+          if 'ENGINE/step_index_cost_sensitivity.py' not in built.get('files', []):
+              raise SystemExit('Cost-sensitivity module missing from package manifest')
+          print(f'PACKAGE_OK file={package} files={len(included)} bytes={package.stat().st_size} sha={built["commit_sha"]}')
           PY
       - name: Upload complete OS ZIP
         uses: actions/upload-artifact@v4
@@ -109,5 +116,7 @@ jobs:
             DATA/step_index_quant_report.json
             DATA/step_index_strategy_lab.pdf
             DATA/step_index_strategy_lab.json
+            DATA/step_index_cost_sensitivity.pdf
+            DATA/step_index_cost_sensitivity.json
           if-no-files-found: ignore
           retention-days: 30
