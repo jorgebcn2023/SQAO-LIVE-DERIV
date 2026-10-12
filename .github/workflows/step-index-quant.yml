@@ -46,12 +46,12 @@ jobs:
       - name: Run Step Index OHLC research and generate PDF
         env:
           DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
-          SQAO_STEP_CANDLES_M1: '1500'
-          SQAO_STEP_CANDLES_M5: '5000'
-          SQAO_STEP_CANDLES_M15: '3000'
-          SQAO_STEP_CANDLES_H1: '1500'
-          SQAO_STEP_CANDLES_D1: '500'
-          SQAO_STEP_CANDLES_W1: '200'
+          SQAO_STEP_CANDLES_M1: '5000'
+          SQAO_STEP_CANDLES_M5: '20000'
+          SQAO_STEP_CANDLES_M15: '7000'
+          SQAO_STEP_CANDLES_H1: '2500'
+          SQAO_STEP_CANDLES_D1: '1000'
+          SQAO_STEP_CANDLES_W1: '260'
           SQAO_STEP_HORIZON_M5: '5'
           SQAO_STEP_TARGET_R: '1.5'
           SQAO_STEP_ATR_MULT: '1.2'
@@ -72,7 +72,7 @@ jobs:
           pdf = Path('DATA/step_index_quant_report.pdf')
           if not pdf.is_file() or pdf.stat().st_size < 5000:
               raise SystemExit('PDF report missing or unexpectedly small')
-          if data.get('decision') not in {'NO_TRADE', 'ELIGIBLE_FOR_FURTHER_REVIEW'}:
+          if data.get('decision') not in {'NO_TRADE', 'CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION'}:
               raise SystemExit('Unexpected decision state')
           print('STEP_INDEX_QUANT_REPORT_OK', 'symbol=', data['symbol']['symbol'],
                 'decision=', data['decision'],
