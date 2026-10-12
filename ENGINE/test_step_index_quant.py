@@ -3,7 +3,9 @@ import math
 from ENGINE.step_index_quant import (
     acceptance_gate, analyze_backtest, equity_stats, log_compounding, log_returns, wilson_interval,
 )
-from ENGINE.step_index_research import backtest_m5, closed_candles, log_distribution, signal_m5
+from ENGINE.step_index_research import (
+    aggregate_weekly_from_daily, backtest_m5, closed_candles, log_distribution, signal_m5,
+)
 
 
 def test_log_returns():
@@ -119,6 +121,25 @@ def test_executive_pdf_generation():
         assert path.stat().st_size > 3000
 
 
+
+def test_aggregate_weekly_from_daily_uses_only_completed_weeks():
+    # Monday 2024-01-01 UTC; full week closes Monday 2024-01-08 00:00 UTC.
+    start = 1704067200
+    rows = []
+    for i in range(7):
+        p = 100 + i
+        rows.append({"epoch": start + i * 86400, "open": p, "high": p + 2,
+                     "low": p - 1, "close": p + 1})
+    rows.append({"epoch": start + 7 * 86400, "open": 108, "high": 110, "low": 107, "close": 109})
+    weekly = aggregate_weekly_from_daily(rows, now_epoch=start + 8 * 86400)
+    assert len(weekly) == 1
+    assert weekly[0]["epoch"] == start
+    assert weekly[0]["open"] == 100
+    assert weekly[0]["high"] == 108
+    assert weekly[0]["low"] == 99
+    assert weekly[0]["close"] == 107
+
+
 if __name__ == "__main__":
     test_log_returns()
     test_wilson_small_sample()
@@ -131,4 +152,5 @@ if __name__ == "__main__":
     test_signal_uses_prior_bars_only()
     test_backtest_rejects_unvalidated_costs()
     test_executive_pdf_generation()
+    test_aggregate_weekly_from_daily_uses_only_completed_weeks()
     print("Step Index quant tests: OK")
