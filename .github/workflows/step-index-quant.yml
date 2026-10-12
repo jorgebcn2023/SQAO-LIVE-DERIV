@@ -107,6 +107,11 @@ jobs:
               raise SystemExit('Unexpected baseline decision state')
           if lab.get('decision') not in {'NO_TRADE', 'CANDIDATE_FOR_REVIEW'} or len(lab.get('strategies', [])) != 3:
               raise SystemExit('Strategy lab output invalid')
+          if not isinstance(lab.get('advanced_snapshot'), dict):
+              raise SystemExit('Advanced diagnostics missing from strategy lab output')
+          for item in lab.get('strategies', []):
+              if 'advanced_bayesian_oos' not in item or 'oos_monte_carlo' not in item:
+                  raise SystemExit('Bayesian/Monte Carlo validation missing from strategy output')
           if am.get('decision') not in {'NO_TRADE','LONG','SHORT','WAIT'} or am.get('monte_carlo',{}).get('paths') != 10000:
               raise SystemExit('ARIMA/Monte Carlo output invalid')
           print('ARIMA_MC_OK', am['decision'], 'ARIMA=', am['arima']['order'], 'P_UP=', am['monte_carlo']['probability_terminal_up'])
