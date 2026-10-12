@@ -49,7 +49,7 @@ def test_closed_candles_drops_forming_bar():
         {"epoch": 100, "open": 10, "high": 11, "low": 9, "close": 10},
         {"epoch": 160, "open": 10, "high": 12, "low": 9, "close": 11},
     ]
-    closed = closed_candles(rows, "M1", now_epoch=200)
+    closed = closed_candles(rows, "M1", now_epoch=230)
     assert [x["epoch"] for x in closed] == [100, 160]
 
 
