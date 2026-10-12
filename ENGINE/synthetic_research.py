@@ -118,3 +118,7 @@ async def run(limit=None,count=2500,timeframe='M5'):
 if __name__=='__main__':
     data=asyncio.run(run(limit=int(os.getenv('SQAO_RESEARCH_LIMIT','0')) or None,count=int(os.getenv('SQAO_RESEARCH_CANDLES','2500')),timeframe=os.getenv('SQAO_RESEARCH_TF','M5')))
     out=Path(os.getenv('SQAO_DATA_DIR','DATA'));out.mkdir(parents=True,exist_ok=True);(out/'synthetic_research.json').write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps(data,ensure_ascii=False,indent=2))
+
+
+# Step Index validation report helpers: imported here for use by CLI/API clients.
+from .step_index_quant import analyze_backtest as analyze_step_index_backtest
