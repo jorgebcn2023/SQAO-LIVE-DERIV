@@ -124,6 +124,7 @@ def analyze_backtest(r_multiples: Iterable[float], close_prices: Iterable[float]
     costs_supplied = cost_r is not None
     cost = float(cost_r) if cost_r is not None else 0.0
     stats = equity_stats(raw_rs, cost_r=cost)
+    # Preserve whether costs were actually supplied; a zero default must not pass the gate.
     prices = list(close_prices or [])
     logs = log_returns(prices)
     stats["log_return_stats"] = {
