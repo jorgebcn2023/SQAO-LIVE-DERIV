@@ -12,6 +12,8 @@ on:
       - 'ENGINE/step_index_quant.py'
       - 'ENGINE/step_index_research.py'
       - 'ENGINE/step_index_strategy_lab.py'
+      - 'ENGINE/step_index_advanced.py'
+      - 'ENGINE/test_step_index_advanced.py'
       - 'ENGINE/step_index_arima_mc.py'
       - 'ENGINE/test_step_index_quant.py'
       - 'ENGINE/requirements.txt'
@@ -46,6 +48,7 @@ jobs:
         run: |
           python -m compileall -q ENGINE
           python -m ENGINE.test_step_index_quant
+python -m ENGINE.test_step_index_advanced
 
       - name: Run Step Index OHLC research and generate PDF
         env:
