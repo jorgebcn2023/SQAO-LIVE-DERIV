@@ -12,6 +12,8 @@ on:
       - 'ENGINE/step_index_quant.py'
       - 'ENGINE/step_index_research.py'
       - 'ENGINE/step_index_strategy_lab.py'
+      - 'ENGINE/step_index_advanced.py'
+      - 'ENGINE/test_step_index_advanced.py'
       - 'ENGINE/step_index_arima_mc.py'
       - 'ENGINE/test_step_index_quant.py'
       - 'ENGINE/requirements.txt'
@@ -46,6 +48,8 @@ jobs:
         run: |
           python -m compileall -q ENGINE
           python -m ENGINE.test_step_index_quant
+          python -m ENGINE.test_step_index_advanced
+          python -m ENGINE.test_step_index_cost_sensitivity
 
       - name: Run Step Index OHLC research and generate PDF
         env:
@@ -78,6 +82,11 @@ jobs:
           SQAO_DATA_DIR: DATA
         run: python -m ENGINE.step_index_strategy_lab
 
+      - name: Run explicit hypothetical round-trip cost sensitivity
+        env:
+          SQAO_DATA_DIR: DATA
+        run: python -m ENGINE.step_index_cost_sensitivity
+
       - name: Run ARIMA and 10,000-path Monte Carlo
         env:
           DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
@@ -97,13 +106,19 @@ jobs:
           data = json.loads(Path('DATA/step_index_quant_report.json').read_text(encoding='utf-8'))
           lab = json.loads(Path('DATA/step_index_strategy_lab.json').read_text(encoding='utf-8'))
           am = json.loads(Path('DATA/step_index_arima_mc.json').read_text(encoding='utf-8'))
-          for name in ['step_index_quant_report.pdf','step_index_strategy_lab.pdf','step_index_arima_mc.pdf']:
+          cost = json.loads(Path('DATA/step_index_cost_sensitivity.json').read_text(encoding='utf-8'))
+          for name in ['step_index_quant_report.pdf','step_index_strategy_lab.pdf','step_index_arima_mc.pdf','step_index_cost_sensitivity.pdf']:
               if not Path('DATA', name).is_file() or Path('DATA', name).stat().st_size < 1000:
                   raise SystemExit(f'Missing/invalid PDF: {name}')
           if data.get('decision') not in {'NO_TRADE', 'CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION'}:
               raise SystemExit('Unexpected baseline decision state')
           if lab.get('decision') not in {'NO_TRADE', 'CANDIDATE_FOR_REVIEW'} or len(lab.get('strategies', [])) != 3:
               raise SystemExit('Strategy lab output invalid')
+          if not isinstance(lab.get('advanced_snapshot'), dict):
+              raise SystemExit('Advanced diagnostics missing from strategy lab output')
+          for item in lab.get('strategies', []):
+              if 'advanced_bayesian_oos' not in item or 'oos_monte_carlo' not in item:
+                  raise SystemExit('Bayesian/Monte Carlo validation missing from strategy output')
           if am.get('decision') not in {'NO_TRADE','LONG','SHORT','WAIT'} or am.get('monte_carlo',{}).get('paths') != 10000:
               raise SystemExit('ARIMA/Monte Carlo output invalid')
           print('ARIMA_MC_OK', am['decision'], 'ARIMA=', am['arima']['order'], 'P_UP=', am['monte_carlo']['probability_terminal_up'])
@@ -120,6 +135,8 @@ jobs:
             DATA/step_index_strategy_lab.json
             DATA/step_index_arima_mc.pdf
             DATA/step_index_arima_mc.json
+            DATA/step_index_cost_sensitivity.pdf
+            DATA/step_index_cost_sensitivity.json
             DATA/step_index_mc_paths.png
             DATA/step_index_mc_distribution.png
             DATA/step_index_arima_oos.png

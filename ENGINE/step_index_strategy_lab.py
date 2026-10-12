@@ -19,6 +19,10 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from .step_index_quant import acceptance_gate, equity_stats
+from .step_index_advanced import (
+    bayesian_probability, calculate_hurst, condition_key, fft_cycle,
+    fisher_transform, hurst_regime, monte_carlo_trade_bootstrap, squeeze_state,
+)
 from .step_index_research import (
     GRANULARITY, atr_series, closed_candles, discover_step_index, ema_series,
     fetch_candles, rsi, _trend_cache, _cached_trend_at,
@@ -120,9 +124,23 @@ def evaluate_strategy(
                 move = (float(m5[j]["close"]) - entry) * (1 if direction == "LONG" else -1)
                 gross_r = max(-1.0, min(rr, move / risk))
         cost_r = float(round_trip_cost_price) / risk if round_trip_cost_price is not None else 0.0
+        # Features use only candles at or before the signal candle; future outcomes are labels only.
+        start = max(0, i - 255)
+        recent_closes = closes[start:i + 1]
+        h_value = calculate_hurst(recent_closes)
+        fft = fft_cycle(closes[max(0, i - 199):i + 1], min_period=8, max_period=100)
+        fisher_series = fisher_transform(
+            [float(x["high"]) for x in m5[max(0, i - 40):i + 1]],
+            [float(x["low"]) for x in m5[max(0, i - 40):i + 1]], length=9)
+        f_value = next((v for v in reversed(fisher_series) if v is not None), None)
+        sq = squeeze_state(m5[max(0, i - 41):i + 1])
+        feature_state = {"hurst": h_value, "fisher": f_value,
+                         "squeeze_release": sq.get("release"),
+                         "direction": direction}
         trades.append({"signal_epoch": decision_epoch, "direction": direction, "entry": entry,
                        "risk_price": risk, "gross_r": gross_r, "cost_r": cost_r,
                        "net_r": gross_r - cost_r, "exit_reason": exit_reason,
+                       "features": feature_state, "fft_cycle": fft, "squeeze": sq,
                        "sample": "train" if i < split else "out_of_sample"})
         next_allowed = last_j + 1
     train = [t for t in trades if t["sample"] == "train"]
@@ -132,10 +150,24 @@ def evaluate_strategy(
     gate = acceptance_gate(net, min_trades=int(os.getenv("SQAO_STEP_MIN_OOS_TRADES", "100")),
                            target_win_rate=float(os.getenv("SQAO_STEP_TARGET_WIN_RATE", "0.70")),
                            require_costs=True, costs_supplied=round_trip_cost_price is not None)
+    # Bayesian conditional estimate is fitted strictly on the earlier training segment.
+    training_samples = [{"features": t["features"], "net_r": t["net_r"]} for t in train]
+    for trade in oos:
+        trade["bayesian"] = bayesian_probability(training_samples, trade["features"], min_samples=30)
+    gated = [t for t in oos if t["bayesian"]["threshold_pass"]]
+    gated_stats = equity_stats([t["net_r"] for t in gated])
+    oos_mc = monte_carlo_trade_bootstrap([t["net_r"] for t in oos], paths=10000)
+    gated_mc = monte_carlo_trade_bootstrap([t["net_r"] for t in gated], paths=10000) if len(gated) >= 2 else {
+        "available": False, "reason": "fewer_than_two_bayesian_qualified_trades"}
     return {"strategy": name, "parameters": {"train_fraction": train_fraction, "horizon_m5": horizon,
             "target_R": rr, "stop_ATR": atr_mult, "round_trip_cost_price": round_trip_cost_price},
             "n_trades_total": len(trades), "train_n": len(train), "oos_n": len(oos),
-            "oos_gross": gross, "oos_net": net, "gate": gate, "trades": trades}
+            "oos_gross": gross, "oos_net": net, "gate": gate,
+            "advanced_bayesian_oos": {"candidate_count": len(oos), "qualified_count": len(gated),
+                "qualified_stats": gated_stats, "qualified_monte_carlo": gated_mc,
+                "qualification_rule": "training-only Bayesian condition bins; >=30 matching train trades and Wilson 95% lower bound >=70%",
+                "note": "Selection is not evidence of a 70% future win rate; sparse matches correctly yield no trade."},
+            "oos_monte_carlo": oos_mc, "trades": trades}
 
 
 def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str],
@@ -152,11 +184,24 @@ def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str]
         x["oos_net"]["profit_factor"] if x["oos_net"]["profit_factor"] is not None else -math.inf,
     ), reverse=True)
     eligible = next((x for x in candidates if x["gate"]["eligible"]), None)
+    closes = [float(r["close"]) for r in m5]
+    h5 = calculate_hurst(closes[-256:])
+    f_series = fisher_transform([float(r["high"]) for r in m5[-40:]],
+                                [float(r["low"]) for r in m5[-40:]], length=9)
+    current_fisher = next((v for v in reversed(f_series) if v is not None), None)
+    sq = squeeze_state(m5[-41:])
+    cycle = fft_cycle(closes[-200:], min_period=8, max_period=100)
     return {"generated_at_utc": datetime.now(timezone.utc).isoformat(), "symbol": symbol,
             "read_only": True, "decision": "CANDIDATE_FOR_REVIEW" if eligible else "NO_TRADE",
             "selection_rule": "Eligibility gate first, then OOS expectancy and profit factor; no tuning on holdout.",
+            "advanced_snapshot": {"hurst_m5": h5, "hurst_regime_m5": hurst_regime(h5),
+                "fisher_m5": current_fisher, "fft_cycle_m5": cycle, "squeeze_m5": sq,
+                "features_are_diagnostics_not_standalone_signals": True},
             "strategies": candidates,
             "limitations": ["Small fixed candidate set; results are not proof of future performance.",
+                           "Bayesian probabilities are trained only on the chronological training segment and require sufficient matching samples.",
+                           "FFT and Hurst estimates are noisy diagnostics; cycle phase is not treated as a guaranteed forecast.",
+                           "Monte Carlo bootstrap quantifies sampling uncertainty, not future certainty.",
                            "No candidate is eligible without realistic round-trip costs.",
                            "No order placement or live trading is implemented."]}
 
@@ -187,8 +232,46 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                                ("FONTSIZE", (0, 0), (-1, -1), 8),
                                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#edf2f7")])]))
-    story.extend([table, Spacer(1, 12), Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.",
-                                                styles["Heading3"])])
+    story.extend([table, Spacer(1, 12), Paragraph("Diagnósticos avanzados (solo investigación)", styles["Heading2"])])
+    snap = report.get("advanced_snapshot", {})
+    cycle = snap.get("fft_cycle_m5", {})
+    sq = snap.get("squeeze_m5", {})
+    fmt_diag = lambda value, digits=3: (
+        "N/D" if value is None or not math.isfinite(float(value)) else f"{float(value):.{digits}f}"
+    )
+    story.append(Paragraph(
+        f"Hurst M5: {fmt_diag(snap.get('hurst_m5'))} ({snap.get('hurst_regime_m5', 'UNKNOWN')}); "
+        f"Fisher M5: {fmt_diag(snap.get('fisher_m5'))}; "
+        f"FFT periodo dominante: {fmt_diag(cycle.get('dominant_period_bars'), 1) if cycle.get('available') else 'N/D'} velas; "
+        f"Squeeze: {sq.get('squeeze') if sq.get('available') else 'N/D'}; "
+        f"liberación: {sq.get('release') if sq.get('available') else 'N/D'}; "
+        f"confirmación de volumen: {sq.get('volume_confirmed') if sq.get('volume_confirmed') is not None else 'N/D'}.",
+        styles["BodyText"]))
+    story.append(Spacer(1, 8))
+    adv_rows = [["Estrategia", "OOS candidatos", "Bayes pasa filtro", "Acierto filtrado", "MC P05 win rate", "MC P05 equity R"]]
+    for item in report["strategies"]:
+        adv = item.get("advanced_bayesian_oos", {})
+        stats = adv.get("qualified_stats", {})
+        mc = adv.get("qualified_monte_carlo", {})
+        pct = lambda x: "N/D" if x is None else f"{100*x:.2f}%"
+        num = lambda x: "N/D" if x is None else f"{x:.3f}"
+        adv_rows.append([item["strategy"], str(adv.get("candidate_count", 0)),
+                         str(adv.get("qualified_count", 0)), pct(stats.get("win_rate")),
+                         pct(mc.get("win_rate_p05")), num(mc.get("terminal_r_p05"))])
+    adv_table = Table(adv_rows, repeatRows=1)
+    adv_table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#243447")),
+                                   ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                                   ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                                   ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                   ("FONTSIZE", (0, 0), (-1, -1), 7),
+                                   ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#edf2f7")])]))
+    story.extend([adv_table, Spacer(1, 10),
+                  Paragraph("Bayes se ajusta únicamente con operaciones de entrenamiento anteriores; en OOS exige al menos "
+                            "30 coincidencias y límite inferior Wilson 95% ≥70%. Monte Carlo usa remuestreo con reemplazo "
+                            "de operaciones para cuantificar incertidumbre, no para prometer resultados futuros. La FFT y "
+                            "Hurst son diagnósticos ruidosos y no se consideran predicciones garantizadas.", styles["BodyText"]),
+                  Spacer(1, 8),
+                  Paragraph("Regla de seguridad: si no supera todos los filtros y no hay costes realistas, NO_TRADE.", styles["Heading3"])])
     doc.build(story)
 
 
