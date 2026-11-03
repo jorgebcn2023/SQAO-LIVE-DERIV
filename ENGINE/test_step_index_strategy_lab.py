@@ -54,4 +54,9 @@ def test_report_always_surfaces_best_observed_and_conditional_execution_sheet():
     assert sheet["status"] == "CONDITIONAL_ONLY_NO_LIVE_ENTRY_PRICE"
     assert sheet["volume_scenarios_lots"] == [0.10, 0.20]
     assert sheet["live_entry_sl_tp"] is None
+    table17 = report["table_17"]
+    money = table17["provisional_monetary_scenarios"]
+    assert money["volumes_lots"] == [0.10, 0.20]
+    assert money["net_of_costs"] is False
+    assert "not broker-spec verified" in money["conversion"]
     assert "70%" in " ".join(report["limitations"]) or report["decision"] == "NO_TRADE"
