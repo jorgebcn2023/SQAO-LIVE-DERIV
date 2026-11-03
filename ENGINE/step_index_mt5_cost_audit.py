@@ -23,6 +23,11 @@ MT5_SPEC = {
     "execution": "MARKET",
     "tick_size_reported": 0.0,
     "tick_value_reported": 0.0,
+    # User-declared conversion: 0.10 USD per 0.1 index point at 0.10 lots.
+    # This is kept separate from the broker-reported MT5 tick fields (both zero).
+    "user_reported_tick_size_price_units": 0.1,
+    "user_reported_tick_value_usd": 0.10,
+    "user_reported_reference_volume_lots": 0.10,
     "volume_min": 0.10,
     "volume_max": 100.0,
     "volume_step": 0.01,
@@ -68,11 +73,30 @@ def audit() -> dict:
                         "pnl_consistent_with_contract_model": abs(delta) <= 0.011,
                         "commission_usd": None, "swap_usd": None})
     spreads = [round(q["ask"] - q["bid"], 10) for q in QUOTE_SAMPLES]
+    user_tick_size = MT5_SPEC["user_reported_tick_size_price_units"]
+    user_tick_value = MT5_SPEC["user_reported_tick_value_usd"]
+    reference_volume = MT5_SPEC["user_reported_reference_volume_lots"]
+    usd_per_price_unit_at_reference_volume = user_tick_value / user_tick_size
+    # Independently reconcile the user-declared conversion against closed deal P&L.
+    conversion_checks = []
+    for trade in HISTORY_SAMPLE:
+        move = abs(trade["exit"] - trade["entry"])
+        expected = (move / user_tick_size) * user_tick_value * (trade["volume"] / reference_volume)
+        conversion_checks.append(abs(abs(trade["profit_usd"]) - expected) <= 0.011)
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "read_only": True,
         "source": "Manual transcription of user-provided MT5 specification, quote and history screenshots",
         "specification": MT5_SPEC,
+        "user_declared_monetary_conversion": {
+            "tick_price_units": user_tick_size,
+            "tick_value_usd": user_tick_value,
+            "reference_volume_lots": reference_volume,
+            "usd_per_price_unit_at_reference_volume": round(usd_per_price_unit_at_reference_volume, 6),
+            "usd_per_tick_per_lot": round(user_tick_value / reference_volume, 6),
+            "history_pnl_crosscheck_all_eight_deals": all(conversion_checks),
+            "evidence_status": "USER_DECLARED_AND_RECONCILED_WITH_TRANSCRIBED_HISTORY; NOT_BROKER_SPEC_VERIFIED",
+        },
         "history_sample": checked,
         "history_summary": {
             "closed_deals_sampled": len(checked),
@@ -98,8 +122,13 @@ def audit() -> dict:
             "reason": "Insufficient evidence for trade-level commission and slippage; spread sample is not a full cost model.",
         },
         "monetary_risk_gate": {
-            "enabled": False,
-            "reason": "MT5 reports tick_size=0.0 and tick_value=0; monetary tick conversion is not verified.",
+            "enabled": True,
+            "basis": "USER_DECLARED_CONVERSION_CROSS_CHECKED_AGAINST_EIGHT_TRANSCRIBED_CLOSED_DEALS",
+            "reference_volume_lots": reference_volume,
+            "usd_per_tick": user_tick_value,
+            "usd_per_price_unit": round(usd_per_price_unit_at_reference_volume, 6),
+            "broker_tick_spec_verified": False,
+            "limitations": "Use only as a provisional conversion for risk estimates. MT5 broker Tick size/value fields still display zero; trade-level commission and slippage remain unknown, so net backtest and executable cost validation remain disabled.",
         },
         "decision": "NO_TRADE",
     }
