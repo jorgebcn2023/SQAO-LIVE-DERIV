@@ -22,6 +22,23 @@ from .step_index_quant import analyze_backtest, equity_stats, log_returns, accep
 WS = os.getenv("DERIV_PUBLIC_WS", "wss://api.derivws.com/trading/v1/options/ws/public")
 GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "D1": 86400, "W1": 604800}
 MAX_CANDLE_CHUNK = 5000
+
+# Deriv-published classic Step Index mechanics; descriptive metadata only.
+# Not MT5 tick_size/tick_value and never used to convert price moves into USD.
+STEP_INDEX_MARKET_MECHANICS = {
+    "instrument_family": "classic_step_index",
+    "price_step_per_tick": 0.1,
+    "direction_probability_up": 0.5,
+    "direction_probability_down": 0.5,
+    "published_drift": 0.0,
+    "units": "quoted_price_units",
+    "use_in_ohlc_calculations": False,
+    "mt5_tick_size_verified": False,
+    "mt5_tick_value_verified": False,
+    "monetary_conversion_enabled": False,
+    "source": "Deriv Academy — Step Indices evolution",
+    "source_url": "https://traders-academy.deriv.com/es/trading-guides/step-indices-evolution-step",
+}
 DEFAULT_COUNTS = {"M1": 5000, "M5": 20000, "M15": 7000, "H1": 2500, "D1": 1000, "W1": 260}
 
 
@@ -504,6 +521,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         p(f"Instrumento: {report['symbol'].get('display_name', report['symbol'].get('symbol', 'Step Index'))} "
           f"({report['symbol'].get('symbol', 'n/d')}) · generado {report['generated_at_utc']} · fuente Deriv public OHLC", "SQSub"),
         p(f"DICTAMEN OPERATIVO: {report['decision']}", "SQH1"),
+        p("Mecánica publicada Deriv: paso de precio 0,1 por tick; probabilidades direccionales 50/50 y deriva publicada 0. Este paso descriptivo no equivale a tick_size/tick_value de MT5 y no se convierte a USD.", "SQBody"),
         p(f"Puerta estadística histórica: {gate['decision']} · setup M5 actual: {setup_state}", "SQBody"),
         p(gate_warning, "SQAlert"),
         p("1. Resultado ejecutivo", "SQH1"),
@@ -646,6 +664,7 @@ async def run_research() -> dict[str, Any]:
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "symbol": symbol,
+        "market_mechanics": STEP_INDEX_MARKET_MECHANICS,
         "source": "Deriv public OHLC; closed candles only",
         "read_only": True,
         "indicators": snapshot(frames),

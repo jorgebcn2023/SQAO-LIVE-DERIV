@@ -15,13 +15,14 @@ from typing import Any
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.units import cm
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from .step_index_quant import acceptance_gate, equity_stats
 from .step_index_research import (
     GRANULARITY, atr_series, closed_candles, discover_step_index, ema_series,
-    fetch_candles, rsi, _trend_cache, _cached_trend_at,
+    fetch_candles, rsi, _trend_cache, _cached_trend_at, STEP_INDEX_MARKET_MECHANICS,
 )
 
 
@@ -146,17 +147,50 @@ def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str]
         evaluate_strategy("ema_pullback_mtf", m5, m15, h1, round_trip_cost_price=cost),
         evaluate_strategy("rsi_reversal", m5, m15, h1, round_trip_cost_price=cost),
     ]
+    # Rank by observed out-of-sample hit rate first, then expectancy and PF.
+    # Eligibility remains a separate evidence gate; ranking never implies a guarantee.
     candidates.sort(key=lambda x: (
-        bool(x["gate"]["eligible"]),
+        x["oos_net"]["win_rate"] if x["oos_net"]["win_rate"] is not None else -math.inf,
         x["oos_net"]["expectancy_r"] if x["oos_net"]["expectancy_r"] is not None else -math.inf,
         x["oos_net"]["profit_factor"] if x["oos_net"]["profit_factor"] is not None else -math.inf,
     ), reverse=True)
+    for rank, candidate in enumerate(candidates, start=1):
+        candidate["rank_by_oos_win_rate"] = rank
     eligible = next((x for x in candidates if x["gate"]["eligible"]), None)
+    # Always surface the strongest observed OOS hit-rate candidate, even when it
+    # fails the 70% gate. This is a research shortlist, never an automatic trade.
+    best_observed = max(candidates, key=lambda x: (
+        x["oos_net"]["win_rate"] if x["oos_net"]["win_rate"] is not None else -math.inf,
+        x["oos_net"]["expectancy_r"] if x["oos_net"]["expectancy_r"] is not None else -math.inf,
+        x["oos_net"]["profit_factor"] if x["oos_net"]["profit_factor"] is not None else -math.inf,
+    ), default=None)
     return {"generated_at_utc": datetime.now(timezone.utc).isoformat(), "symbol": symbol,
-            "read_only": True, "decision": "CANDIDATE_FOR_REVIEW" if eligible else "NO_TRADE",
-            "selection_rule": "Eligibility gate first, then OOS expectancy and profit factor; no tuning on holdout.",
+            "read_only": True,
+            "market_mechanics": STEP_INDEX_MARKET_MECHANICS,
+            "performance_basis": "NET_AFTER_CONFIGURED_COSTS" if cost is not None else "GROSS_COSTS_NOT_CONFIGURED",
+            "oos_net_is_gross_proxy": cost is None,
+            "decision": "CANDIDATE_FOR_REVIEW" if eligible else "NO_TRADE",
+            "selection_rule": "Rank all candidates by observed out-of-sample win rate descending; expectancy and profit factor are tie-breakers. The 70% eligibility gate is separate; no tuning on holdout.",
+            "win_rate_definition": "Observed wins divided by evaluated OOS trades after the selected cost basis; descriptive historical frequency, not a guaranteed future outcome or next-trade probability.",
+            "best_observed_candidate": best_observed["strategy"] if best_observed else None,
+            "best_observed_candidate_metrics": best_observed["oos_net"] if best_observed else None,
+            "best_observed_candidate_parameters": best_observed["parameters"] if best_observed else None,
+            "execution_sheet": {
+                "status": "CONDITIONAL_ONLY_NO_LIVE_ENTRY_PRICE",
+                "volume_scenarios_lots": [0.10, 0.20],
+                "entry": "Next M5 candle open after a fully closed and confirmed signal; refresh Bid/Ask before sending any manual order.",
+                "stop": "1.2 x M5 ATR(14) from entry; strategy-specific stop logic remains in the tested rule.",
+                "target": "1.5R from entry",
+                "maximum_holding_period_m5_bars": 5,
+                "spread_observed_price_units": 0.1,
+                "round_trip_cost_price_units": cost,
+                "commission_and_slippage": "Not supplied; not assumed to be zero.",
+                "live_entry_sl_tp": None,
+                "warning": "No live entry, SL or TP prices are emitted unless a current closed-candle trigger and executable quote are both available."
+            },
             "strategies": candidates,
             "limitations": ["Small fixed candidate set; results are not proof of future performance.",
+                           "Best observed candidate may still have negative expectancy or fail the 70% gate.",
                            "No candidate is eligible without realistic round-trip costs.",
                            "No order placement or live trading is implemented."]}
 
@@ -169,15 +203,20 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
              Paragraph(f"Generado UTC: {report['generated_at_utc']} | Símbolo: {report['symbol']['symbol']}",
                        styles["Normal"]), Spacer(1, 12),
              Paragraph(f"Decisión: {report['decision']}", styles["Heading2"]),
-             Paragraph("Comparación cronológica fuera de muestra. No es una predicción ni garantiza resultados.",
+             Paragraph("Mecánica publicada Deriv: paso 0,1 por tick; probabilidades 50/50 y deriva publicada 0. Es metadato descriptivo, no tick_size/tick_value MT5 ni conversión monetaria.", styles["BodyText"]),
+             Paragraph("Comparación cronológica fuera de muestra. " +
+                       ("MÉTRICAS BRUTAS: no se configuraron costes round-trip; no deben interpretarse como rendimiento neto." if report.get("oos_net_is_gross_proxy") else "Métricas netas tras aplicar el coste round-trip configurado.") +
+                       " No es una predicción ni garantiza resultados.",
                        styles["BodyText"]), Spacer(1, 12)]
-    rows = [["Estrategia", "N OOS", "Acierto", "IC Wilson 95%", "Expectativa R", "PF", "DD máx R", "Elegible"]]
+    metric_suffix = " (bruto)" if report.get("oos_net_is_gross_proxy") else " (neto)"
+    rows = [["Rango", "Estrategia", "Aciertos/N", "Efectividad OOS" + metric_suffix, "IC Wilson 95%", "Expectativa R" + metric_suffix, "PF" + metric_suffix, "DD máx R" + metric_suffix, "Elegible"]]
     for item in report["strategies"]:
         s = item["oos_net"]
         pct = lambda x: "N/D" if x is None else f"{100*x:.2f}%"
         num = lambda x: "N/D" if x is None or not math.isfinite(x) else f"{x:.3f}"
         ci = f"{pct(s['wilson_95_low'])}–{pct(s['wilson_95_high'])}"
-        rows.append([item["strategy"], str(item["oos_n"]), pct(s["win_rate"]), ci,
+        rows.append([str(item.get("rank_by_oos_win_rate", "N/D")), item["strategy"],
+                     f'{s["wins"]}/{s["n"]}', pct(s["win_rate"]), ci,
                      num(s["expectancy_r"]), num(s["profit_factor"]), num(s["max_drawdown_r"]),
                      "SÍ" if item["gate"]["eligible"] else "NO"])
     table = Table(rows, repeatRows=1)
@@ -187,8 +226,89 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                                ("FONTSIZE", (0, 0), (-1, -1), 8),
                                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#edf2f7")])]))
-    story.extend([table, Spacer(1, 12), Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.",
-                                                styles["Heading3"])])
+    story.extend([table, Spacer(1, 12)])
+    best_name = report.get("best_observed_candidate")
+    best = next((x for x in report["strategies"] if x["strategy"] == best_name), None)
+    story.append(Paragraph("RANKING OOS POR EFECTIVIDAD OBSERVADA (SE MUESTRAN TODAS LAS CANDIDATAS, INCLUSO <70%)", styles["Heading2"]))
+    if best is None:
+        story.append(Paragraph("No hay una candidata evaluable con los datos disponibles.", styles["BodyText"]))
+    else:
+        s = best["oos_net"]
+        pct = lambda x: "N/D" if x is None else f"{100*x:.2f}%"
+        num = lambda x: "N/D" if x is None or not math.isfinite(x) else f"{x:.3f}"
+        story.append(Paragraph(
+            f"Estrategia: {best['strategy']} · Muestra OOS: {best['oos_n']} · "
+            f"Acierto observado: {pct(s['win_rate'])} · IC Wilson 95%: "
+            f"{pct(s['wilson_95_low'])}–{pct(s['wilson_95_high'])} · "
+            f"Expectativa: {num(s['expectancy_r'])} R · PF: {num(s['profit_factor'])}. "
+            f"Puerta 70%: {'APROBADA' if best['gate']['eligible'] else 'NO SUPERADA'}.",
+            styles["BodyText"]))
+        story.append(Paragraph(
+            "Parámetros evaluados: entrada en apertura de la siguiente vela M5; "
+            f"objetivo {best['parameters']['target_R']} R; stop {best['parameters']['stop_ATR']} x ATR(14); "
+            f"horizonte máximo {best['parameters']['horizon_m5']} velas M5. "
+            "La regla concreta de entrada depende de la estrategia seleccionada y de sus filtros M15/H1.",
+            styles["BodyText"]))
+    sheet = report.get("execution_sheet", {})
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("FICHA DE EJECUCIÓN CONDICIONAL", styles["Heading2"]))
+    exec_rows = [
+        ["Campo", "Valor"],
+        ["Estado", sheet.get("status", "N/D")],
+        ["Volúmenes de referencia", ", ".join(str(x) for x in sheet.get("volume_scenarios_lots", [])) + " lotes"],
+        ["Entrada", sheet.get("entry", "N/D")],
+        ["Stop", sheet.get("stop", "N/D")],
+        ["Objetivo", sheet.get("target", "N/D")],
+        ["Spread observado", str(sheet.get("spread_observed_price_units", "N/D")) + " unidades de precio"],
+        ["Coste round-trip configurado", str(sheet.get("round_trip_cost_price_units", "NO CONFIGURADO"))],
+        ["Comisión / deslizamiento", sheet.get("commission_and_slippage", "N/D")],
+        ["Precios actuales de entrada/SL/TP", "NO DISPONIBLES: falta trigger y cotización ejecutable"]
+    ]
+    et = Table(exec_rows, colWidths=[6*cm, 19*cm], repeatRows=1)
+    et.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+                            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                            ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                            ("FONTSIZE",(0,0),(-1,-1),8),
+                            ("VALIGN",(0,0),(-1,-1),"TOP")]))
+    story.extend([et, Spacer(1, 10)])
+    table17 = report.get("table_17", {})
+    story.append(Paragraph("TABLA 17 — OPERACIÓN SCALPING MEJOR CLASIFICADA", styles["Heading2"]))
+    fmt_price = lambda x: "NO DISPONIBLE" if x is None else f"{float(x):.2f}"
+    fmt_pct = lambda x: "N/D" if x is None else f"{100*float(x):.2f}%"
+    t17_rows = [
+        ["Estrategia", "Dirección", "Entrada", "Stop Loss", "Take Profit", "Efectividad OOS", "Estado"],
+        [str(table17.get("strategy") or "N/D"), str(table17.get("direction") or "N/D"),
+         fmt_price(table17.get("entry")), fmt_price(table17.get("stop_loss")),
+         fmt_price(table17.get("take_profit")), fmt_pct(table17.get("oos_win_rate")),
+         str(table17.get("status") or "NO_TRADE")]
+    ]
+    t17 = Table(t17_rows, colWidths=[3.1*cm, 1.8*cm, 2.0*cm, 2.0*cm, 2.0*cm, 2.6*cm, 7.5*cm], repeatRows=1)
+    t17.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+                             ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                             ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                             ("FONTSIZE",(0,0),(-1,-1),7),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    story.extend([t17, Spacer(1, 5)])
+    money = table17.get("provisional_monetary_scenarios", {})
+    risk_usd, reward_usd = money.get("risk_usd", {}), money.get("reward_usd", {})
+    money_rows = [["Volumen", "Riesgo teórico USD", "Beneficio teórico USD"],
+                  ["0,10 lotes", str(risk_usd.get("0.1", "N/D")), str(reward_usd.get("0.1", "N/D"))],
+                  ["0,20 lotes", str(risk_usd.get("0.2", "N/D")), str(reward_usd.get("0.2", "N/D"))]]
+    mt = Table(money_rows, colWidths=[5*cm, 7*cm, 7*cm], repeatRows=1)
+    mt.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+                            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                            ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                            ("FONTSIZE",(0,0),(-1,-1),8)]))
+    story.extend([Paragraph("RIESGO Y RECOMPENSA MONETARIA PROVISIONAL", styles["Heading3"]),
+        mt, Paragraph("Conversión declarada por el usuario: 0,10 USD por cada 0,1 puntos a 0,10 lotes. Conciliada con 8 operaciones históricas; no verificada como Tick Value oficial MT5. Importes teóricos, antes de spread, comisión y slippage; no son beneficio neto ni autorización de ejecución.", styles["BodyText"]), Spacer(1, 5),
+        Paragraph("IC Wilson 95%: " + "–".join(fmt_pct(x) for x in (table17.get("wilson95") or [None,None])) +
+                  " · Expectativa R: " + ("N/D" if table17.get("expectancy_r") is None else f"{table17['expectancy_r']:.3f}") +
+                  " · PF: " + ("N/D" if table17.get("profit_factor") is None else f"{table17['profit_factor']:.3f}") +
+                  " · DD máximo R: " + ("N/D" if table17.get("max_drawdown_r") is None else f"{table17['max_drawdown_r']:.3f}"), styles["BodyText"]),
+        Paragraph("Estadísticas de esta regla: " + str(table17.get("statistics_status", "N/D")) + ". No se atribuyen a esta señal las métricas de otra estrategia del Strategy Lab.", styles["BodyText"]),
+        Paragraph("La entrada/SL/TP solo se publican como precios ejecutables si el detector confirma el disparador y la apertura de la siguiente vela M1 coincide exactamente con el epoch esperado. En otro caso se muestran NO DISPONIBLE y NO_TRADE; no se sustituye por el cierre histórico.", styles["BodyText"]), Spacer(1, 10),
+        Paragraph("El ranking ordena por efectividad OOS observada; expectativa, PF e intervalo de confianza permiten contextualizarla. La efectividad es una frecuencia histórica de la muestra, no una garantía ni la probabilidad de la próxima operación. Si no supera los filtros o faltan costes reales, la decisión sigue siendo NO_TRADE.",
+                  styles["BodyText"]),
+        Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.", styles["Heading3"])])
     doc.build(story)
 
 
@@ -213,6 +333,65 @@ async def run() -> dict[str, Any]:
 def main() -> None:
     report = asyncio.run(run())
     out = Path(os.getenv("SQAO_DATA_DIR", "DATA"))
+    detector_path = out / "step_index_scalping_v23.json"
+    detector = {}
+    if detector_path.is_file():
+        try:
+            detector = json.loads(detector_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            detector = {}
+    setup = detector.get("setup", {}) if isinstance(detector, dict) else {}
+    best = next((x for x in report.get("strategies", [])
+                 if x.get("strategy") == report.get("best_observed_candidate")), None)
+    metrics = best.get("oos_net", {}) if best else {}
+    # Never attach Strategy Lab metrics to a different detector rule.
+    # The live detector is a M5 pullback + M1 trigger; Strategy Lab candidates
+    # (breakout20_mtf / ema_pullback_mtf / rsi_reversal) are separate rules.
+    detector_rule = "m5_pullback_m1_trigger"
+    same_rule_metrics = None  # No chronological OOS replay exists for detector_rule yet.
+    # Provisional USD conversion supplied by the user and reconciled against
+    # eight transcribed closed deals: 0.10 USD per 0.1 price unit at 0.10 lots.
+    # This is not broker-published MT5 tick_value; never imply cost-net results.
+    user_tick_size = 0.1
+    user_tick_value_usd = 0.10
+    reference_lots = 0.10
+    def provisional_usd(distance, lots):
+        if distance is None:
+            return None
+        return round((abs(float(distance)) / user_tick_size) * user_tick_value_usd * (lots / reference_lots), 2)
+    entry_ref = setup.get("entry_price")
+    stop_ref = setup.get("stop_loss")
+    target_ref = setup.get("take_profit")
+    stop_distance = abs(float(entry_ref) - float(stop_ref)) if entry_ref is not None and stop_ref is not None else None
+    target_distance = abs(float(target_ref) - float(entry_ref)) if entry_ref is not None and target_ref is not None else None
+    report["table_17"] = {
+        "strategy": detector_rule,
+        "direction": setup.get("direction"),
+        "entry": setup.get("entry_price"),
+        "stop_loss": setup.get("stop_loss"),
+        "take_profit": setup.get("take_profit"),
+        "stop_distance_price_units": stop_distance,
+        "target_distance_price_units": target_distance,
+        "provisional_monetary_scenarios": {
+            "conversion": "0.10 USD per 0.1 price unit at 0.10 lots; user-declared and history-reconciled, not broker-spec verified",
+            "volumes_lots": [0.10, 0.20],
+            "risk_usd": {str(v): provisional_usd(stop_distance, v) for v in (0.10, 0.20)},
+            "reward_usd": {str(v): provisional_usd(target_distance, v) for v in (0.10, 0.20)},
+            "net_of_costs": False
+        },
+        "execution_price_confirmed": bool(setup.get("execution_price_confirmed")),
+        "status": setup.get("status", "NO_TRADE — detector no disponible"),
+        "oos_wins": None, "oos_trades": None,
+        "oos_win_rate": None,
+        "wilson95": [None, None],
+        "expectancy_r": None,
+        "profit_factor": None,
+        "max_drawdown_r": None,
+        "statistics_status": "N/A — no OOS backtest for this exact detector rule and parameter set",
+        "separate_best_observed_candidate": report.get("best_observed_candidate"),
+        "separate_best_observed_metrics": metrics,
+        "price_source": "Deriv current M1 candle open with exact epoch match" if setup.get("execution_price_confirmed") else "No verified next-M1 open; no executable prices"
+    }
     out.mkdir(parents=True, exist_ok=True)
     json_path, pdf_path = out / "step_index_strategy_lab.json", out / "step_index_strategy_lab.pdf"
     def json_safe(value):
