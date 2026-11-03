@@ -22,7 +22,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from .step_index_quant import acceptance_gate, equity_stats
 from .step_index_research import (
     GRANULARITY, atr_series, closed_candles, discover_step_index, ema_series,
-    fetch_candles, rsi, _trend_cache, _cached_trend_at,
+    fetch_candles, rsi, _trend_cache, _cached_trend_at, STEP_INDEX_MARKET_MECHANICS,
 )
 
 
@@ -162,6 +162,7 @@ def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str]
     ), default=None)
     return {"generated_at_utc": datetime.now(timezone.utc).isoformat(), "symbol": symbol,
             "read_only": True,
+            "market_mechanics": STEP_INDEX_MARKET_MECHANICS,
             "performance_basis": "NET_AFTER_CONFIGURED_COSTS" if cost is not None else "GROSS_COSTS_NOT_CONFIGURED",
             "oos_net_is_gross_proxy": cost is None,
             "decision": "CANDIDATE_FOR_REVIEW" if eligible else "NO_TRADE",
