@@ -287,7 +287,19 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                              ("TEXTCOLOR",(0,0),(-1,0),colors.white),
                              ("GRID",(0,0),(-1,-1),0.5,colors.grey),
                              ("FONTSIZE",(0,0),(-1,-1),7),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
-    story.extend([t17, Spacer(1, 5),
+    story.extend([t17, Spacer(1, 5)])
+    money = table17.get("provisional_monetary_scenarios", {})
+    risk_usd, reward_usd = money.get("risk_usd", {}), money.get("reward_usd", {})
+    money_rows = [["Volumen", "Riesgo teórico USD", "Beneficio teórico USD"],
+                  ["0,10 lotes", str(risk_usd.get("0.1", "N/D")), str(reward_usd.get("0.1", "N/D"))],
+                  ["0,20 lotes", str(risk_usd.get("0.2", "N/D")), str(reward_usd.get("0.2", "N/D"))]]
+    mt = Table(money_rows, colWidths=[5*cm, 7*cm, 7*cm], repeatRows=1)
+    mt.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+                            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                            ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                            ("FONTSIZE",(0,0),(-1,-1),8)]))
+    story.extend([Paragraph("RIESGO Y RECOMPENSA MONETARIA PROVISIONAL", styles["Heading3"]),
+        mt, Paragraph("Conversión declarada por el usuario: 0,10 USD por cada 0,1 puntos a 0,10 lotes. Conciliada con 8 operaciones históricas; no verificada como Tick Value oficial MT5. Importes teóricos, antes de spread, comisión y slippage; no son beneficio neto ni autorización de ejecución.", styles["BodyText"]), Spacer(1, 5),
         Paragraph("IC Wilson 95%: " + "–".join(fmt_pct(x) for x in (table17.get("wilson95") or [None,None])) +
                   " · Expectativa R: " + ("N/D" if table17.get("expectancy_r") is None else f"{table17['expectancy_r']:.3f}") +
                   " · PF: " + ("N/D" if table17.get("profit_factor") is None else f"{table17['profit_factor']:.3f}") +
@@ -337,12 +349,36 @@ def main() -> None:
     # (breakout20_mtf / ema_pullback_mtf / rsi_reversal) are separate rules.
     detector_rule = "m5_pullback_m1_trigger"
     same_rule_metrics = None  # No chronological OOS replay exists for detector_rule yet.
+    # Provisional USD conversion supplied by the user and reconciled against
+    # eight transcribed closed deals: 0.10 USD per 0.1 price unit at 0.10 lots.
+    # This is not broker-published MT5 tick_value; never imply cost-net results.
+    user_tick_size = 0.1
+    user_tick_value_usd = 0.10
+    reference_lots = 0.10
+    def provisional_usd(distance, lots):
+        if distance is None:
+            return None
+        return round((abs(float(distance)) / user_tick_size) * user_tick_value_usd * (lots / reference_lots), 2)
+    entry_ref = setup.get("entry_price")
+    stop_ref = setup.get("stop_loss")
+    target_ref = setup.get("take_profit")
+    stop_distance = abs(float(entry_ref) - float(stop_ref)) if entry_ref is not None and stop_ref is not None else None
+    target_distance = abs(float(target_ref) - float(entry_ref)) if entry_ref is not None and target_ref is not None else None
     report["table_17"] = {
         "strategy": detector_rule,
         "direction": setup.get("direction"),
         "entry": setup.get("entry_price"),
         "stop_loss": setup.get("stop_loss"),
         "take_profit": setup.get("take_profit"),
+        "stop_distance_price_units": stop_distance,
+        "target_distance_price_units": target_distance,
+        "provisional_monetary_scenarios": {
+            "conversion": "0.10 USD per 0.1 price unit at 0.10 lots; user-declared and history-reconciled, not broker-spec verified",
+            "volumes_lots": [0.10, 0.20],
+            "risk_usd": {str(v): provisional_usd(stop_distance, v) for v in (0.10, 0.20)},
+            "reward_usd": {str(v): provisional_usd(target_distance, v) for v in (0.10, 0.20)},
+            "net_of_costs": False
+        },
         "execution_price_confirmed": bool(setup.get("execution_price_confirmed")),
         "status": setup.get("status", "NO_TRADE — detector no disponible"),
         "oos_wins": None, "oos_trades": None,
