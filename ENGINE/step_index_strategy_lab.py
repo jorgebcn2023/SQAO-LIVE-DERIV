@@ -292,6 +292,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                   " · Expectativa R: " + ("N/D" if table17.get("expectancy_r") is None else f"{table17['expectancy_r']:.3f}") +
                   " · PF: " + ("N/D" if table17.get("profit_factor") is None else f"{table17['profit_factor']:.3f}") +
                   " · DD máximo R: " + ("N/D" if table17.get("max_drawdown_r") is None else f"{table17['max_drawdown_r']:.3f}"), styles["BodyText"]),
+        Paragraph("Estadísticas de esta regla: " + str(table17.get("statistics_status", "N/D")) + ". No se atribuyen a esta señal las métricas de otra estrategia del Strategy Lab.", styles["BodyText"]),
         Paragraph("La entrada/SL/TP solo se publican como precios ejecutables si el detector confirma el disparador y la apertura de la siguiente vela M1 coincide exactamente con el epoch esperado. En otro caso se muestran NO DISPONIBLE y NO_TRADE; no se sustituye por el cierre histórico.", styles["BodyText"]), Spacer(1, 10),
         Paragraph("El ranking ordena por efectividad OOS observada; expectativa, PF e intervalo de confianza permiten contextualizarla. La efectividad es una frecuencia histórica de la muestra, no una garantía ni la probabilidad de la próxima operación. Si no supera los filtros o faltan costes reales, la decisión sigue siendo NO_TRADE.",
                   styles["BodyText"]),
