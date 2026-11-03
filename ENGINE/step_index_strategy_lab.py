@@ -270,7 +270,29 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                             ("GRID",(0,0),(-1,-1),0.5,colors.grey),
                             ("FONTSIZE",(0,0),(-1,-1),8),
                             ("VALIGN",(0,0),(-1,-1),"TOP")]))
-    story.extend([et, Spacer(1, 10),
+    story.extend([et, Spacer(1, 10)])
+    table17 = report.get("table_17", {})
+    story.append(Paragraph("TABLA 17 — OPERACIÓN SCALPING MEJOR CLASIFICADA", styles["Heading2"]))
+    fmt_price = lambda x: "NO DISPONIBLE" if x is None else f"{float(x):.2f}"
+    fmt_pct = lambda x: "N/D" if x is None else f"{100*float(x):.2f}%"
+    t17_rows = [
+        ["Estrategia", "Dirección", "Entrada", "Stop Loss", "Take Profit", "Efectividad OOS", "Estado"],
+        [str(table17.get("strategy") or "N/D"), str(table17.get("direction") or "N/D"),
+         fmt_price(table17.get("entry")), fmt_price(table17.get("stop_loss")),
+         fmt_price(table17.get("take_profit")), fmt_pct(table17.get("oos_win_rate")),
+         str(table17.get("status") or "NO_TRADE")]
+    ]
+    t17 = Table(t17_rows, colWidths=[3.5*cm, 2.0*cm, 2.2*cm, 2.2*cm, 2.2*cm, 2.8*cm, 8.0*cm], repeatRows=1)
+    t17.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+                             ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                             ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                             ("FONTSIZE",(0,0),(-1,-1),7),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    story.extend([t17, Spacer(1, 5),
+        Paragraph("IC Wilson 95%: " + "–".join(fmt_pct(x) for x in (table17.get("wilson95") or [None,None])) +
+                  " · Expectativa R: " + ("N/D" if table17.get("expectancy_r") is None else f"{table17['expectancy_r']:.3f}") +
+                  " · PF: " + ("N/D" if table17.get("profit_factor") is None else f"{table17['profit_factor']:.3f}") +
+                  " · DD máximo R: " + ("N/D" if table17.get("max_drawdown_r") is None else f"{table17['max_drawdown_r']:.3f}"), styles["BodyText"]),
+        Paragraph("La entrada/SL/TP solo se publican como precios ejecutables si el detector confirma el disparador y la apertura de la siguiente vela M1 coincide exactamente con el epoch esperado. En otro caso se muestran NO DISPONIBLE y NO_TRADE; no se sustituye por el cierre histórico.", styles["BodyText"]), Spacer(1, 10),
         Paragraph("El ranking ordena por efectividad OOS observada; expectativa, PF e intervalo de confianza permiten contextualizarla. La efectividad es una frecuencia histórica de la muestra, no una garantía ni la probabilidad de la próxima operación. Si no supera los filtros o faltan costes reales, la decisión sigue siendo NO_TRADE.",
                   styles["BodyText"]),
         Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.", styles["Heading3"])])
@@ -298,6 +320,33 @@ async def run() -> dict[str, Any]:
 def main() -> None:
     report = asyncio.run(run())
     out = Path(os.getenv("SQAO_DATA_DIR", "DATA"))
+    detector_path = out / "step_index_scalping_v23.json"
+    detector = {}
+    if detector_path.is_file():
+        try:
+            detector = json.loads(detector_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            detector = {}
+    setup = detector.get("setup", {}) if isinstance(detector, dict) else {}
+    best = next((x for x in report.get("strategies", [])
+                 if x.get("strategy") == report.get("best_observed_candidate")), None)
+    metrics = best.get("oos_net", {}) if best else {}
+    report["table_17"] = {
+        "strategy": report.get("best_observed_candidate"),
+        "direction": setup.get("direction"),
+        "entry": setup.get("entry_price"),
+        "stop_loss": setup.get("stop_loss"),
+        "take_profit": setup.get("take_profit"),
+        "execution_price_confirmed": bool(setup.get("execution_price_confirmed")),
+        "status": setup.get("status", "NO_TRADE — detector no disponible"),
+        "oos_wins": metrics.get("wins"), "oos_trades": metrics.get("n"),
+        "oos_win_rate": metrics.get("win_rate"),
+        "wilson95": [metrics.get("wilson_95_low"), metrics.get("wilson_95_high")],
+        "expectancy_r": metrics.get("expectancy_r"),
+        "profit_factor": metrics.get("profit_factor"),
+        "max_drawdown_r": metrics.get("max_drawdown_r"),
+        "price_source": "Deriv current M1 candle open with exact epoch match" if setup.get("execution_price_confirmed") else "No verified next-M1 open; no executable prices"
+    }
     out.mkdir(parents=True, exist_ok=True)
     json_path, pdf_path = out / "step_index_strategy_lab.json", out / "step_index_strategy_lab.pdf"
     def json_safe(value):
