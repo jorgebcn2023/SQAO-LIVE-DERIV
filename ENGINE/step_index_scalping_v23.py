@@ -124,7 +124,40 @@ async def market():
         }
     return sym,frames,diagnostics
 
-def detect(f):
+async def fetch_current_m1_open(symbol):
+    """Read the forming M1 candle's open only; never use its high/low/close for signals."""
+    async with websockets.connect(WS,open_timeout=20,ping_interval=20) as ws:
+        data=await req(ws,{"ticks_history":symbol,"end":"latest","count":1,
+                           "style":"candles","granularity":TF["M1"],"req_id":99001})
+    rows=data.get("candles",[]) or []
+    if not rows:
+        return None
+    try:
+        row=rows[-1]; epoch=int(row["epoch"]); price=float(row["open"])
+        now=int(datetime.now(timezone.utc).timestamp())
+        if not math.isfinite(price) or price<=0 or not (epoch<=now<epoch+TF["M1"]):
+            return None
+        return {"epoch":epoch,"open":price,"source":"Deriv current M1 candle open"}
+    except (KeyError,TypeError,ValueError):
+        return None
+
+def execution_levels(direction_value, entry, atr_value, stop_atr=1.2, target_r=1.5):
+    """Return price levels in quoted price units; no monetary conversion."""
+    if direction_value not in {"LONG","SHORT"} or entry is None or atr_value is None:
+        return None
+    if not all(math.isfinite(float(x)) for x in (entry,atr_value,stop_atr,target_r)):
+        return None
+    if float(entry)<=0 or float(atr_value)<=0 or float(stop_atr)<=0 or float(target_r)<=0:
+        return None
+    risk=float(atr_value)*float(stop_atr)
+    sign=1 if direction_value=="LONG" else -1
+    stop=float(entry)-sign*risk
+    target=float(entry)+sign*risk*float(target_r)
+    return {"entry":float(entry),"stop_loss":stop,"take_profit":target,
+            "risk_price_units":risk,"reward_price_units":risk*float(target_r),
+            "risk_reward":f"1:{float(target_r):g}"}
+
+def detect(f, next_open=None):
     need={"M1":40,"M5":40,"M15":30,"H1":30}
     if any(len(f.get(k,[]))<n for k,n in need.items()):return {"state":"INSUFFICIENT_DATA","confirmed":False}
     m1,m5=f["M1"],f["M5"]; bias=direction(f["H1"][-100:]); mid=direction(f["M15"][-100:])
@@ -146,12 +179,23 @@ def detect(f):
     if not trig:return {"state":"M5_SETUP_WAIT_M1_TRIGGER","confirmed":False,"direction":bias,"rsi14":rsi}
     vol=atr(m1[-100:],14)
     if not vol or vol<=0:return {"state":"ATR_UNAVAILABLE","confirmed":False}
-    entry=cur["close"]; stop=entry-vol if bias=="LONG" else entry+vol
-    return {"state":"TRIGGER_CONFIRMED_NEXT_M1_OPEN","confirmed":True,"direction":bias,"reference_close":entry,"stop_reference":stop,"target_1R":entry+(entry-stop) if bias=="LONG" else entry-(stop-entry),"target_1_5R":entry+1.5*(entry-stop) if bias=="LONG" else entry-1.5*(stop-entry),"atr14_m1":vol,"decision_epoch":cur["epoch"]+60,"entry_rule":"next M1 open"}
+    decision_epoch=cur["epoch"]+TF["M1"]
+    reference=execution_levels(bias,cur["close"],vol)
+    quote_ok=(isinstance(next_open,dict) and next_open.get("epoch")==decision_epoch)
+    executable=execution_levels(bias,next_open.get("open"),vol) if quote_ok else None
+    return {"state":"TRIGGER_CONFIRMED_NEXT_M1_OPEN" if executable else "TRIGGER_CONFIRMED_WAIT_NEXT_M1_OPEN",
+            "confirmed":True,"direction":bias,"reference_close":cur["close"],
+            "reference_levels":reference,"execution_levels":executable,
+            "entry_price":executable["entry"] if executable else None,
+            "stop_loss":executable["stop_loss"] if executable else None,
+            "take_profit":executable["take_profit"] if executable else None,
+            "execution_price_confirmed":bool(executable),"atr14_m1":vol,
+            "decision_epoch":decision_epoch,"entry_rule":"open of next M1 candle; exact epoch match required",
+            "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION" if executable else "NO_TRADE"}
 
 def main():
-    sym,frames,diagnostics=asyncio.run(market()); setup=detect(frames)
-    report={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"symbol":sym,"source":"Deriv public OHLC, closed candles only","read_only":True,"data_counts":{k:len(v) for k,v in frames.items()},"data_diagnostics":diagnostics,"last_closed":{k:v[-1] if v else None for k,v in frames.items()},"setup":setup,"warning":"A trigger is a research signal, not a profitability estimate. Validate execution costs and OOS statistics before use."}
+    sym,frames,diagnostics=asyncio.run(market()); next_open=asyncio.run(fetch_current_m1_open(sym["symbol"])); setup=detect(frames,next_open)
+    report={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"symbol":sym,"source":"Deriv public OHLC, closed candles only","read_only":True,"data_counts":{k:len(v) for k,v in frames.items()},"data_diagnostics":diagnostics,"last_closed":{k:v[-1] if v else None for k,v in frames.items()},"next_m1_open":next_open,"setup":setup,"warning":"A trigger is a research signal, not a profitability estimate. Validate execution costs and OOS statistics before use."}
     Path("DATA").mkdir(exist_ok=True); Path("DATA/step_index_scalping_v23.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
     print(json.dumps({"symbol":sym,"counts":report["data_counts"],"setup":setup},indent=2))
 if __name__=="__main__": main()
