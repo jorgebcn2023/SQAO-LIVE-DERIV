@@ -141,6 +141,20 @@ async def fetch_current_m1_open(symbol):
     except (KeyError,TypeError,ValueError):
         return None
 
+def match_next_m1_open(next_open, expected_epoch):
+    """Accept only a finite positive open for the exact expected M1 epoch."""
+    if not isinstance(next_open, dict):
+        return None
+    try:
+        epoch = int(next_open["epoch"])
+        price = float(next_open["open"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if epoch != int(expected_epoch) or not math.isfinite(price) or price <= 0:
+        return None
+    return {"epoch": epoch, "open": price}
+
+
 def execution_levels(direction_value, entry, atr_value, stop_atr=1.2, target_r=1.5):
     """Return price levels in quoted price units; no monetary conversion."""
     if direction_value not in {"LONG","SHORT"} or entry is None or atr_value is None:
@@ -181,8 +195,8 @@ def detect(f, next_open=None):
     if not vol or vol<=0:return {"state":"ATR_UNAVAILABLE","confirmed":False}
     decision_epoch=cur["epoch"]+TF["M1"]
     reference=execution_levels(bias,cur["close"],vol)
-    quote_ok=(isinstance(next_open,dict) and next_open.get("epoch")==decision_epoch)
-    executable=execution_levels(bias,next_open.get("open"),vol) if quote_ok else None
+    matched_open = match_next_m1_open(next_open, decision_epoch)
+    executable=execution_levels(bias,matched_open["open"],vol) if matched_open else None
     return {"state":"TRIGGER_CONFIRMED_NEXT_M1_OPEN" if executable else "TRIGGER_CONFIRMED_WAIT_NEXT_M1_OPEN",
             "confirmed":True,"direction":bias,"reference_close":cur["close"],
             "reference_levels":reference,"execution_levels":executable,
