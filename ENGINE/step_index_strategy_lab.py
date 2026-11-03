@@ -152,11 +152,35 @@ def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str]
         x["oos_net"]["profit_factor"] if x["oos_net"]["profit_factor"] is not None else -math.inf,
     ), reverse=True)
     eligible = next((x for x in candidates if x["gate"]["eligible"]), None)
+    # Always surface the strongest observed OOS hit-rate candidate, even when it
+    # fails the 70% gate. This is a research shortlist, never an automatic trade.
+    best_observed = max(candidates, key=lambda x: (
+        x["oos_net"]["win_rate"] if x["oos_net"]["win_rate"] is not None else -math.inf,
+        x["oos_net"]["expectancy_r"] if x["oos_net"]["expectancy_r"] is not None else -math.inf,
+        x["oos_net"]["profit_factor"] if x["oos_net"]["profit_factor"] is not None else -math.inf,
+    ), default=None)
     return {"generated_at_utc": datetime.now(timezone.utc).isoformat(), "symbol": symbol,
             "read_only": True, "decision": "CANDIDATE_FOR_REVIEW" if eligible else "NO_TRADE",
-            "selection_rule": "Eligibility gate first, then OOS expectancy and profit factor; no tuning on holdout.",
+            "selection_rule": "Highest observed OOS win rate first; expectancy and profit factor as tie-breakers. Eligibility gate reported separately; no tuning on holdout.",
+            "best_observed_candidate": best_observed["strategy"] if best_observed else None,
+            "best_observed_candidate_metrics": best_observed["oos_net"] if best_observed else None,
+            "best_observed_candidate_parameters": best_observed["parameters"] if best_observed else None,
+            "execution_sheet": {
+                "status": "CONDITIONAL_ONLY_NO_LIVE_ENTRY_PRICE",
+                "volume_scenarios_lots": [0.10, 0.20],
+                "entry": "Next M5 candle open after a fully closed and confirmed signal; refresh Bid/Ask before sending any manual order.",
+                "stop": "1.2 x M5 ATR(14) from entry; strategy-specific stop logic remains in the tested rule.",
+                "target": "1.5R from entry",
+                "maximum_holding_period_m5_bars": 5,
+                "spread_observed_price_units": 0.1,
+                "round_trip_cost_price_units": cost,
+                "commission_and_slippage": "Not supplied; not assumed to be zero.",
+                "live_entry_sl_tp": None,
+                "warning": "No live entry, SL or TP prices are emitted unless a current closed-candle trigger and executable quote are both available."
+            },
             "strategies": candidates,
             "limitations": ["Small fixed candidate set; results are not proof of future performance.",
+                           "Best observed candidate may still have negative expectancy or fail the 70% gate.",
                            "No candidate is eligible without realistic round-trip costs.",
                            "No order placement or live trading is implemented."]}
 
@@ -187,8 +211,54 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                                ("FONTSIZE", (0, 0), (-1, -1), 8),
                                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#edf2f7")])]))
-    story.extend([table, Spacer(1, 12), Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.",
-                                                styles["Heading3"])])
+    story.extend([table, Spacer(1, 12)])
+    best_name = report.get("best_observed_candidate")
+    best = next((x for x in report["strategies"] if x["strategy"] == best_name), None)
+    story.append(Paragraph("MEJOR CANDIDATA OBSERVADA (SE MUESTRA AUNQUE SEA <70%)", styles["Heading2"]))
+    if best is None:
+        story.append(Paragraph("No hay una candidata evaluable con los datos disponibles.", styles["BodyText"]))
+    else:
+        s = best["oos_net"]
+        pct = lambda x: "N/D" if x is None else f"{100*x:.2f}%"
+        num = lambda x: "N/D" if x is None or not math.isfinite(x) else f"{x:.3f}"
+        story.append(Paragraph(
+            f"Estrategia: {best['strategy']} · Muestra OOS: {best['oos_n']} · "
+            f"Acierto observado: {pct(s['win_rate'])} · IC Wilson 95%: "
+            f"{pct(s['wilson_95_low'])}–{pct(s['wilson_95_high'])} · "
+            f"Expectativa: {num(s['expectancy_r'])} R · PF: {num(s['profit_factor'])}. "
+            f"Puerta 70%: {'APROBADA' if best['gate']['eligible'] else 'NO SUPERADA'}.",
+            styles["BodyText"]))
+        story.append(Paragraph(
+            "Parámetros evaluados: entrada en apertura de la siguiente vela M5; "
+            f"objetivo {best['parameters']['target_R']} R; stop {best['parameters']['stop_ATR']} x ATR(14); "
+            f"horizonte máximo {best['parameters']['horizon_m5']} velas M5. "
+            "La regla concreta de entrada depende de la estrategia seleccionada y de sus filtros M15/H1.",
+            styles["BodyText"]))
+    sheet = report.get("execution_sheet", {})
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("FICHA DE EJECUCIÓN CONDICIONAL", styles["Heading2"]))
+    exec_rows = [
+        ["Campo", "Valor"],
+        ["Estado", sheet.get("status", "N/D")],
+        ["Volúmenes de referencia", ", ".join(str(x) for x in sheet.get("volume_scenarios_lots", [])) + " lotes"],
+        ["Entrada", sheet.get("entry", "N/D")],
+        ["Stop", sheet.get("stop", "N/D")],
+        ["Objetivo", sheet.get("target", "N/D")],
+        ["Spread observado", str(sheet.get("spread_observed_price_units", "N/D")) + " unidades de precio"],
+        ["Coste round-trip configurado", str(sheet.get("round_trip_cost_price_units", "NO CONFIGURADO"))],
+        ["Comisión / deslizamiento", sheet.get("commission_and_slippage", "N/D")],
+        ["Precios actuales de entrada/SL/TP", "NO DISPONIBLES: falta trigger y cotización ejecutable"]
+    ]
+    et = Table(exec_rows, colWidths=[6*cm, 19*cm], repeatRows=1)
+    et.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+                            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                            ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                            ("FONTSIZE",(0,0),(-1,-1),8),
+                            ("VALIGN",(0,0),(-1,-1),"TOP")]))
+    story.extend([et, Spacer(1, 10),
+        Paragraph("La mejor candidata se informa por su tasa de acierto OOS observada, con expectativa, PF e intervalo de confianza para evitar elegir una tasa alta pero económicamente negativa. No equivale a una probabilidad predictiva ni a una recomendación automática. Si no supera los filtros o faltan costes reales, la decisión sigue siendo NO_TRADE.",
+                  styles["BodyText"]),
+        Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.", styles["Heading3"])])
     doc.build(story)
 
 
