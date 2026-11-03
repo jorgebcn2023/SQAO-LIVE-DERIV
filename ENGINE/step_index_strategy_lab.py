@@ -331,20 +331,28 @@ def main() -> None:
     best = next((x for x in report.get("strategies", [])
                  if x.get("strategy") == report.get("best_observed_candidate")), None)
     metrics = best.get("oos_net", {}) if best else {}
+    # Never attach Strategy Lab metrics to a different detector rule.
+    # The live detector is a M5 pullback + M1 trigger; Strategy Lab candidates
+    # (breakout20_mtf / ema_pullback_mtf / rsi_reversal) are separate rules.
+    detector_rule = "m5_pullback_m1_trigger"
+    same_rule_metrics = None  # No chronological OOS replay exists for detector_rule yet.
     report["table_17"] = {
-        "strategy": report.get("best_observed_candidate"),
+        "strategy": detector_rule,
         "direction": setup.get("direction"),
         "entry": setup.get("entry_price"),
         "stop_loss": setup.get("stop_loss"),
         "take_profit": setup.get("take_profit"),
         "execution_price_confirmed": bool(setup.get("execution_price_confirmed")),
         "status": setup.get("status", "NO_TRADE — detector no disponible"),
-        "oos_wins": metrics.get("wins"), "oos_trades": metrics.get("n"),
-        "oos_win_rate": metrics.get("win_rate"),
-        "wilson95": [metrics.get("wilson_95_low"), metrics.get("wilson_95_high")],
-        "expectancy_r": metrics.get("expectancy_r"),
-        "profit_factor": metrics.get("profit_factor"),
-        "max_drawdown_r": metrics.get("max_drawdown_r"),
+        "oos_wins": None, "oos_trades": None,
+        "oos_win_rate": None,
+        "wilson95": [None, None],
+        "expectancy_r": None,
+        "profit_factor": None,
+        "max_drawdown_r": None,
+        "statistics_status": "N/A — no OOS backtest for this exact detector rule and parameter set",
+        "separate_best_observed_candidate": report.get("best_observed_candidate"),
+        "separate_best_observed_metrics": metrics,
         "price_source": "Deriv current M1 candle open with exact epoch match" if setup.get("execution_price_confirmed") else "No verified next-M1 open; no executable prices"
     }
     out.mkdir(parents=True, exist_ok=True)
