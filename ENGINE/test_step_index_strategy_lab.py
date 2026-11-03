@@ -25,6 +25,14 @@ def test_candidate_report_is_conservative():
                            "H1": frame(180, 3600)}, {"symbol": "TEST", "display_name": "Test"})
     assert report["decision"] in {"NO_TRADE", "CANDIDATE_FOR_REVIEW"}
     assert len(report["strategies"]) == 3
+    mechanics = report["market_mechanics"]
+    assert mechanics["price_step_per_tick"] == 0.1
+    assert mechanics["direction_probability_up"] == 0.5
+    assert mechanics["direction_probability_down"] == 0.5
+    assert mechanics["published_drift"] == 0.0
+    assert mechanics["use_in_ohlc_calculations"] is False
+    assert mechanics["mt5_tick_value_verified"] is False
+    assert mechanics["monetary_conversion_enabled"] is False
     assert all(x["strategy"] in {"breakout20_mtf", "ema_pullback_mtf", "rsi_reversal"}
                for x in report["strategies"])
 
