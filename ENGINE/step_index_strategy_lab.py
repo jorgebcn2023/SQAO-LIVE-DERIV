@@ -161,7 +161,10 @@ def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str]
         x["oos_net"]["profit_factor"] if x["oos_net"]["profit_factor"] is not None else -math.inf,
     ), default=None)
     return {"generated_at_utc": datetime.now(timezone.utc).isoformat(), "symbol": symbol,
-            "read_only": True, "decision": "CANDIDATE_FOR_REVIEW" if eligible else "NO_TRADE",
+            "read_only": True,
+            "performance_basis": "NET_AFTER_CONFIGURED_COSTS" if cost is not None else "GROSS_COSTS_NOT_CONFIGURED",
+            "oos_net_is_gross_proxy": cost is None,
+            "decision": "CANDIDATE_FOR_REVIEW" if eligible else "NO_TRADE",
             "selection_rule": "Highest observed OOS win rate first; expectancy and profit factor as tie-breakers. Eligibility gate reported separately; no tuning on holdout.",
             "best_observed_candidate": best_observed["strategy"] if best_observed else None,
             "best_observed_candidate_metrics": best_observed["oos_net"] if best_observed else None,
@@ -194,9 +197,12 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
              Paragraph(f"Generado UTC: {report['generated_at_utc']} | Símbolo: {report['symbol']['symbol']}",
                        styles["Normal"]), Spacer(1, 12),
              Paragraph(f"Decisión: {report['decision']}", styles["Heading2"]),
-             Paragraph("Comparación cronológica fuera de muestra. No es una predicción ni garantiza resultados.",
+             Paragraph("Comparación cronológica fuera de muestra. " +
+                       ("MÉTRICAS BRUTAS: no se configuraron costes round-trip; no deben interpretarse como rendimiento neto." if report.get("oos_net_is_gross_proxy") else "Métricas netas tras aplicar el coste round-trip configurado.") +
+                       " No es una predicción ni garantiza resultados.",
                        styles["BodyText"]), Spacer(1, 12)]
-    rows = [["Estrategia", "N OOS", "Acierto", "IC Wilson 95%", "Expectativa R", "PF", "DD máx R", "Elegible"]]
+    metric_suffix = " (bruto)" if report.get("oos_net_is_gross_proxy") else " (neto)"
+    rows = [["Estrategia", "N OOS", "Acierto" + metric_suffix, "IC Wilson 95%", "Expectativa R" + metric_suffix, "PF" + metric_suffix, "DD máx R" + metric_suffix, "Elegible"]]
     for item in report["strategies"]:
         s = item["oos_net"]
         pct = lambda x: "N/D" if x is None else f"{100*x:.2f}%"
