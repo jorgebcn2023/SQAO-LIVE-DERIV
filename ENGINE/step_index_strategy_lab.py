@@ -282,7 +282,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
          fmt_price(table17.get("take_profit")), fmt_pct(table17.get("oos_win_rate")),
          str(table17.get("status") or "NO_TRADE")]
     ]
-    t17 = Table(t17_rows, colWidths=[3.5*cm, 2.0*cm, 2.2*cm, 2.2*cm, 2.2*cm, 2.8*cm, 8.0*cm], repeatRows=1)
+    t17 = Table(t17_rows, colWidths=[3.1*cm, 1.8*cm, 2.0*cm, 2.0*cm, 2.0*cm, 2.6*cm, 7.5*cm], repeatRows=1)
     t17.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
                              ("TEXTCOLOR",(0,0),(-1,0),colors.white),
                              ("GRID",(0,0),(-1,-1),0.5,colors.grey),
