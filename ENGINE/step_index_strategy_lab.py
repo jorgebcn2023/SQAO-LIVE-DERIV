@@ -198,6 +198,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
              Paragraph(f"Generado UTC: {report['generated_at_utc']} | Símbolo: {report['symbol']['symbol']}",
                        styles["Normal"]), Spacer(1, 12),
              Paragraph(f"Decisión: {report['decision']}", styles["Heading2"]),
+             Paragraph("Mecánica publicada Deriv: paso 0,1 por tick; probabilidades 50/50 y deriva publicada 0. Es metadato descriptivo, no tick_size/tick_value MT5 ni conversión monetaria.", styles["BodyText"]),
              Paragraph("Comparación cronológica fuera de muestra. " +
                        ("MÉTRICAS BRUTAS: no se configuraron costes round-trip; no deben interpretarse como rendimiento neto." if report.get("oos_net_is_gross_proxy") else "Métricas netas tras aplicar el coste round-trip configurado.") +
                        " No es una predicción ni garantiza resultados.",
