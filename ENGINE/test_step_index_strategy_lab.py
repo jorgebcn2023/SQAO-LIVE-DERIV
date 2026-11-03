@@ -27,3 +27,15 @@ def test_candidate_report_is_conservative():
     assert len(report["strategies"]) == 3
     assert all(x["strategy"] in {"breakout20_mtf", "ema_pullback_mtf", "rsi_reversal"}
                for x in report["strategies"])
+
+
+def test_report_always_surfaces_best_observed_and_conditional_execution_sheet():
+    report = build_report({"M5": frame(400, 300), "M15": frame(250, 900),
+                           "H1": frame(180, 3600)}, {"symbol": "TEST", "display_name": "Test"})
+    assert report["best_observed_candidate"] in {x["strategy"] for x in report["strategies"]}
+    assert report["best_observed_candidate_metrics"] is not None
+    sheet = report["execution_sheet"]
+    assert sheet["status"] == "CONDITIONAL_ONLY_NO_LIVE_ENTRY_PRICE"
+    assert sheet["volume_scenarios_lots"] == [0.10, 0.20]
+    assert sheet["live_entry_sl_tp"] is None
+    assert "70%" in " ".join(report["limitations"]) or report["decision"] == "NO_TRADE"
