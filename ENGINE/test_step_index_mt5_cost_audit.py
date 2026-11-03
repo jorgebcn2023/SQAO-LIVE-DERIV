@@ -18,7 +18,11 @@ def test_unknown_costs_and_tick_conversion_remain_blocked():
     assert report["cost_gate"]["slippage_price_units"] is None
     assert report["cost_gate"]["round_trip_cost_price_units"] is None
     assert report["cost_gate"]["backtest_net_enabled"] is False
-    assert report["monetary_risk_gate"]["enabled"] is False
+    assert report["monetary_risk_gate"]["enabled"] is True
+    assert report["monetary_risk_gate"]["usd_per_tick"] == 0.10
+    assert report["monetary_risk_gate"]["usd_per_price_unit"] == 1.0
+    assert report["monetary_risk_gate"]["broker_tick_spec_verified"] is False
+    assert report["user_declared_monetary_conversion"]["history_pnl_crosscheck_all_eight_deals"] is True
     assert report["decision"] == "NO_TRADE"
 
 
