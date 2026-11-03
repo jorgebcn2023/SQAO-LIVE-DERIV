@@ -1,5 +1,5 @@
 import unittest
-from ENGINE.step_index_scalping_v23 import ema, direction, validate, detect
+from ENGINE.step_index_scalping_v23 import ema, direction, validate, detect, match_next_m1_open
 
 class ScalpingV23Tests(unittest.TestCase):
     def test_ema(self):
@@ -39,6 +39,18 @@ class ScalpingV23Tests(unittest.TestCase):
         epochs = [r["epoch"] for r in result]
         self.assertEqual(epochs, sorted(epochs))
         self.assertEqual(len(set(epochs)), len(epochs))
+
+
+    def test_next_m1_open_requires_exact_epoch(self):
+        self.assertEqual(match_next_m1_open({"epoch": 120, "open": 12.5}, 120),
+                         {"epoch": 120, "open": 12.5})
+        self.assertIsNone(match_next_m1_open({"epoch": 60, "open": 12.5}, 120))
+
+    def test_next_m1_open_rejects_missing_stale_and_invalid_price(self):
+        self.assertIsNone(match_next_m1_open(None, 120))
+        self.assertIsNone(match_next_m1_open({"epoch": 120, "open": 0}, 120))
+        self.assertIsNone(match_next_m1_open({"epoch": 120, "open": float("nan")}, 120))
+        self.assertIsNone(match_next_m1_open({"epoch": 120}, 120))
 
     def test_execution_levels_long_and_short(self):
         from ENGINE.step_index_scalping_v23 import execution_levels
