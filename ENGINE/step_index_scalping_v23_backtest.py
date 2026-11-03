@@ -15,7 +15,7 @@ def stats(rs):
     eq=peak=dd=0
     for x in rs:
         eq+=x; peak=max(peak,eq); dd=max(dd,peak-eq)
-    return {"n":n,"win_rate":wins/n if n else None,"wilson95":wilson(wins,n),"expectancy_r":sum(rs)/n if n else None,"profit_factor":gp/gl if gl else (float("inf") if gp else None),"max_drawdown_r":dd,"total_r":sum(rs)}
+    return {"n":n,"win_rate":wins/n if n else None,"wilson95":wilson(wins,n),"expectancy_r":sum(rs)/n if n else None,"profit_factor":gp/gl if gl else None,"max_drawdown_r":dd,"total_r":sum(rs)}
 
 def replay(frames,cost):
     m1=frames["M1"]; trades=[]; next_i=0
