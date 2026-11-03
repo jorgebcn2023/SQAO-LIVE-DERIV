@@ -40,4 +40,19 @@ class ScalpingV23Tests(unittest.TestCase):
         self.assertEqual(epochs, sorted(epochs))
         self.assertEqual(len(set(epochs)), len(epochs))
 
+    def test_execution_levels_long_and_short(self):
+        from ENGINE.step_index_scalping_v23 import execution_levels
+        long_levels=execution_levels("LONG",100,2)
+        self.assertEqual(long_levels["entry"],100)
+        self.assertAlmostEqual(long_levels["stop_loss"],97.6)
+        self.assertAlmostEqual(long_levels["take_profit"],103.6)
+        short_levels=execution_levels("SHORT",100,2)
+        self.assertAlmostEqual(short_levels["stop_loss"],102.4)
+        self.assertAlmostEqual(short_levels["take_profit"],96.4)
+
+    def test_execution_levels_reject_invalid_inputs(self):
+        from ENGINE.step_index_scalping_v23 import execution_levels
+        self.assertIsNone(execution_levels("SHORT",None,2))
+        self.assertIsNone(execution_levels("FLAT",100,2))
+
 if __name__=="__main__": unittest.main()
