@@ -147,11 +147,15 @@ def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str]
         evaluate_strategy("ema_pullback_mtf", m5, m15, h1, round_trip_cost_price=cost),
         evaluate_strategy("rsi_reversal", m5, m15, h1, round_trip_cost_price=cost),
     ]
+    # Rank by observed out-of-sample hit rate first, then expectancy and PF.
+    # Eligibility remains a separate evidence gate; ranking never implies a guarantee.
     candidates.sort(key=lambda x: (
-        bool(x["gate"]["eligible"]),
+        x["oos_net"]["win_rate"] if x["oos_net"]["win_rate"] is not None else -math.inf,
         x["oos_net"]["expectancy_r"] if x["oos_net"]["expectancy_r"] is not None else -math.inf,
         x["oos_net"]["profit_factor"] if x["oos_net"]["profit_factor"] is not None else -math.inf,
     ), reverse=True)
+    for rank, candidate in enumerate(candidates, start=1):
+        candidate["rank_by_oos_win_rate"] = rank
     eligible = next((x for x in candidates if x["gate"]["eligible"]), None)
     # Always surface the strongest observed OOS hit-rate candidate, even when it
     # fails the 70% gate. This is a research shortlist, never an automatic trade.
@@ -166,7 +170,8 @@ def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str]
             "performance_basis": "NET_AFTER_CONFIGURED_COSTS" if cost is not None else "GROSS_COSTS_NOT_CONFIGURED",
             "oos_net_is_gross_proxy": cost is None,
             "decision": "CANDIDATE_FOR_REVIEW" if eligible else "NO_TRADE",
-            "selection_rule": "Highest observed OOS win rate first; expectancy and profit factor as tie-breakers. Eligibility gate reported separately; no tuning on holdout.",
+            "selection_rule": "Rank all candidates by observed out-of-sample win rate descending; expectancy and profit factor are tie-breakers. The 70% eligibility gate is separate; no tuning on holdout.",
+            "win_rate_definition": "Observed wins divided by evaluated OOS trades after the selected cost basis; descriptive historical frequency, not a guaranteed future outcome or next-trade probability.",
             "best_observed_candidate": best_observed["strategy"] if best_observed else None,
             "best_observed_candidate_metrics": best_observed["oos_net"] if best_observed else None,
             "best_observed_candidate_parameters": best_observed["parameters"] if best_observed else None,
@@ -204,13 +209,14 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                        " No es una predicción ni garantiza resultados.",
                        styles["BodyText"]), Spacer(1, 12)]
     metric_suffix = " (bruto)" if report.get("oos_net_is_gross_proxy") else " (neto)"
-    rows = [["Estrategia", "N OOS", "Acierto" + metric_suffix, "IC Wilson 95%", "Expectativa R" + metric_suffix, "PF" + metric_suffix, "DD máx R" + metric_suffix, "Elegible"]]
+    rows = [["Rango", "Estrategia", "Aciertos/N", "Efectividad OOS" + metric_suffix, "IC Wilson 95%", "Expectativa R" + metric_suffix, "PF" + metric_suffix, "DD máx R" + metric_suffix, "Elegible"]]
     for item in report["strategies"]:
         s = item["oos_net"]
         pct = lambda x: "N/D" if x is None else f"{100*x:.2f}%"
         num = lambda x: "N/D" if x is None or not math.isfinite(x) else f"{x:.3f}"
         ci = f"{pct(s['wilson_95_low'])}–{pct(s['wilson_95_high'])}"
-        rows.append([item["strategy"], str(item["oos_n"]), pct(s["win_rate"]), ci,
+        rows.append([str(item.get("rank_by_oos_win_rate", "N/D")), item["strategy"],
+                     f'{s["wins"]}/{s["n"]}', pct(s["win_rate"]), ci,
                      num(s["expectancy_r"]), num(s["profit_factor"]), num(s["max_drawdown_r"]),
                      "SÍ" if item["gate"]["eligible"] else "NO"])
     table = Table(rows, repeatRows=1)
@@ -223,7 +229,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     story.extend([table, Spacer(1, 12)])
     best_name = report.get("best_observed_candidate")
     best = next((x for x in report["strategies"] if x["strategy"] == best_name), None)
-    story.append(Paragraph("MEJOR CANDIDATA OBSERVADA (SE MUESTRA AUNQUE SEA <70%)", styles["Heading2"]))
+    story.append(Paragraph("RANKING OOS POR EFECTIVIDAD OBSERVADA (SE MUESTRAN TODAS LAS CANDIDATAS, INCLUSO <70%)", styles["Heading2"]))
     if best is None:
         story.append(Paragraph("No hay una candidata evaluable con los datos disponibles.", styles["BodyText"]))
     else:
@@ -265,7 +271,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                             ("FONTSIZE",(0,0),(-1,-1),8),
                             ("VALIGN",(0,0),(-1,-1),"TOP")]))
     story.extend([et, Spacer(1, 10),
-        Paragraph("La mejor candidata se informa por su tasa de acierto OOS observada, con expectativa, PF e intervalo de confianza para evitar elegir una tasa alta pero económicamente negativa. No equivale a una probabilidad predictiva ni a una recomendación automática. Si no supera los filtros o faltan costes reales, la decisión sigue siendo NO_TRADE.",
+        Paragraph("El ranking ordena por efectividad OOS observada; expectativa, PF e intervalo de confianza permiten contextualizarla. La efectividad es una frecuencia histórica de la muestra, no una garantía ni la probabilidad de la próxima operación. Si no supera los filtros o faltan costes reales, la decisión sigue siendo NO_TRADE.",
                   styles["BodyText"]),
         Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.", styles["Heading3"])])
     doc.build(story)
