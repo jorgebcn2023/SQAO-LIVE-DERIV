@@ -1,0 +1,91 @@
+"""SQAO Step Index MTF scalping v23. Research-only; never places orders."""
+from __future__ import annotations
+import asyncio, json, math, os
+from datetime import datetime, timezone
+from pathlib import Path
+import websockets
+
+WS = os.getenv("DERIV_PUBLIC_WS", "wss://api.derivws.com/trading/v1/options/ws/public")
+TF = {"M1":60,"M5":300,"M15":900,"H1":3600,"H4":14400}
+
+def ema(x, n):
+    if len(x)<n: return None
+    a=2/(n+1); v=sum(x[:n])/n
+    for z in x[n:]: v=a*z+(1-a)*v
+    return v
+
+def atr(rows,n=14):
+    if len(rows)<n+1:return None
+    tr=[]
+    for p,c in zip(rows,rows[1:]):
+        tr.append(max(c["high"]-c["low"],abs(c["high"]-p["close"]),abs(c["low"]-p["close"])))
+    return sum(tr[-n:])/n
+
+def direction(rows):
+    c=[r["close"] for r in rows]
+    a,b=ema(c,10),ema(c,20)
+    return "LONG" if a is not None and b is not None and a>b else "SHORT" if a is not None and b is not None and a<b else None
+
+def validate(rows,tf,now):
+    sec=TF[tf]; out={}
+    for r in rows:
+        try:
+            x={k:float(r[k]) for k in ("open","high","low","close")}
+            t=int(r["epoch"])
+            if t+sec>now or not all(math.isfinite(v) for v in x.values()):continue
+            if x["high"]<max(x["open"],x["close"],x["low"]) or x["low"]>min(x["open"],x["close"],x["high"]):continue
+            out[t]={"epoch":t,**x}
+        except (KeyError,TypeError,ValueError): continue
+    return [out[t] for t in sorted(out)]
+
+async def req(ws,p):
+    await ws.send(json.dumps(p))
+    while True:
+        m=json.loads(await asyncio.wait_for(ws.recv(),timeout=25))
+        if m.get("error"): raise RuntimeError(m["error"].get("message","Deriv API error"))
+        if m.get("req_id")==p["req_id"]: return m
+
+async def market():
+    async with websockets.connect(WS,open_timeout=20,ping_interval=20) as ws:
+        d=await req(ws,{"active_symbols":"brief","req_id":1})
+    symbols=[{"symbol":str(x.get("symbol","")),"name":str(x.get("display_name",""))} for x in d.get("active_symbols",[]) if "step index" in (str(x.get("display_name",""))+" "+str(x.get("symbol",""))).lower()]
+    if not symbols: raise RuntimeError("Deriv returned no active Step Index symbol")
+    sym=next((x for x in symbols if x["name"].lower()=="step index"),symbols[0])
+    frames={}
+    async with websockets.connect(WS,open_timeout=20,ping_interval=20) as ws:
+        for i,(tf,count) in enumerate((("M1",5000),("M5",5000),("M15",2500),("H1",1200),("H4",700)),10):
+            d=await req(ws,{"ticks_history":sym["symbol"],"end":"latest","count":count,"style":"candles","granularity":TF[tf],"req_id":i})
+            frames[tf]=validate(d.get("candles",[]),tf,int(datetime.now(timezone.utc).timestamp()))
+    return sym,frames
+
+def detect(f):
+    need={"M1":40,"M5":40,"M15":30,"H1":30}
+    if any(len(f.get(k,[]))<n for k,n in need.items()):return {"state":"INSUFFICIENT_DATA","confirmed":False}
+    m1,m5=f["M1"],f["M5"]; bias=direction(f["H1"][-100:]); mid=direction(f["M15"][-100:])
+    h4=direction(f["H4"][-100:]) if len(f.get("H4",[]))>=30 else None
+    if not bias or bias!=mid or (h4 and h4!=bias):return {"state":"MTF_CONFLICT","confirmed":False}
+    c=[r["close"] for r in m5[-100:]]
+    e10,e20=ema(c,10),ema(c,20); last=m5[-1]
+    if e10 is None or e20 is None:return {"state":"INSUFFICIENT_DATA","confirmed":False}
+    # Pullback touches EMA10-20 area and closes back in trend direction.
+    lo=min(e10,e20); hi=max(e10,e20)
+    touched=last["low"]<=hi and last["high"]>=lo
+    rejected=(last["close"]>hi and bias=="LONG") or (last["close"]<lo and bias=="SHORT")
+    if not (touched and rejected):return {"state":"BIAS_ONLY_WAIT_PULLBACK","confirmed":False,"direction":bias}
+    prev=m1[-2]; cur=m1[-1]; rsi_closes=[x["close"] for x in m1[-15:]]
+    delta=[rsi_closes[i]-rsi_closes[i-1] for i in range(1,len(rsi_closes))]
+    gains=sum(max(x,0) for x in delta)/14; losses=sum(max(-x,0) for x in delta)/14
+    rsi=100 if losses==0 and gains else 50 if losses==0 else 100-100/(1+gains/losses)
+    trig=(cur["close"]>prev["high"] and cur["close"]>ema([x["close"] for x in m1[-30:]],9) and rsi>=50) if bias=="LONG" else (cur["close"]<prev["low"] and cur["close"]<ema([x["close"] for x in m1[-30:]],9) and rsi<=50)
+    if not trig:return {"state":"M5_SETUP_WAIT_M1_TRIGGER","confirmed":False,"direction":bias,"rsi14":rsi}
+    vol=atr(m1[-100:],14)
+    if not vol or vol<=0:return {"state":"ATR_UNAVAILABLE","confirmed":False}
+    entry=cur["close"]; stop=entry-vol if bias=="LONG" else entry+vol
+    return {"state":"TRIGGER_CONFIRMED_NEXT_M1_OPEN","confirmed":True,"direction":bias,"reference_close":entry,"stop_reference":stop,"target_1R":entry+(entry-stop) if bias=="LONG" else entry-(stop-entry),"target_1_5R":entry+1.5*(entry-stop) if bias=="LONG" else entry-1.5*(stop-entry),"atr14_m1":vol,"decision_epoch":cur["epoch"]+60,"entry_rule":"next M1 open"}
+
+def main():
+    sym,frames=asyncio.run(market()); setup=detect(frames)
+    report={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"symbol":sym,"source":"Deriv public OHLC, closed candles only","read_only":True,"data_counts":{k:len(v) for k,v in frames.items()},"last_closed":{k:v[-1] if v else None for k,v in frames.items()},"setup":setup,"warning":"A trigger is a research signal, not a profitability estimate. Validate execution costs and OOS statistics before use."}
+    Path("DATA").mkdir(exist_ok=True); Path("DATA/step_index_scalping_v23.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
+    print(json.dumps({"symbol":sym,"counts":report["data_counts"],"setup":setup},indent=2))
+if __name__=="__main__": main()
