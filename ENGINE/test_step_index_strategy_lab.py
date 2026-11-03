@@ -35,6 +35,14 @@ def test_candidate_report_is_conservative():
     assert mechanics["monetary_conversion_enabled"] is False
     assert all(x["strategy"] in {"breakout20_mtf", "ema_pullback_mtf", "rsi_reversal"}
                for x in report["strategies"])
+    assert [x["rank_by_oos_win_rate"] for x in report["strategies"]] == [1, 2, 3]
+    rates = [x["oos_net"]["win_rate"] for x in report["strategies"]]
+    assert rates == sorted(rates, reverse=True)
+    for item in report["strategies"]:
+        stats = item["oos_net"]
+        expected = stats["wins"] / stats["n"] if stats["n"] else None
+        assert stats["win_rate"] == expected
+    assert "not a guaranteed" in report["win_rate_definition"]
 
 
 def test_report_always_surfaces_best_observed_and_conditional_execution_sheet():
