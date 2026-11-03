@@ -20,3 +20,9 @@ def test_unknown_costs_and_tick_conversion_remain_blocked():
     assert report["cost_gate"]["backtest_net_enabled"] is False
     assert report["monetary_risk_gate"]["enabled"] is False
     assert report["decision"] == "NO_TRADE"
+
+
+if __name__ == "__main__":
+    test_history_transcription_and_contract_arithmetic()
+    test_unknown_costs_and_tick_conversion_remain_blocked()
+    print("MT5_COST_AUDIT_TESTS_OK")
