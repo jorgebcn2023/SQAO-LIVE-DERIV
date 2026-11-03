@@ -521,6 +521,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         p(f"Instrumento: {report['symbol'].get('display_name', report['symbol'].get('symbol', 'Step Index'))} "
           f"({report['symbol'].get('symbol', 'n/d')}) · generado {report['generated_at_utc']} · fuente Deriv public OHLC", "SQSub"),
         p(f"DICTAMEN OPERATIVO: {report['decision']}", "SQH1"),
+        p("Mecánica publicada Deriv: paso de precio 0,1 por tick; probabilidades direccionales 50/50 y deriva publicada 0. Este paso descriptivo no equivale a tick_size/tick_value de MT5 y no se convierte a USD.", "SQBody"),
         p(f"Puerta estadística histórica: {gate['decision']} · setup M5 actual: {setup_state}", "SQBody"),
         p(gate_warning, "SQAlert"),
         p("1. Resultado ejecutivo", "SQH1"),
