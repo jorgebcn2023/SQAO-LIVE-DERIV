@@ -45,6 +45,47 @@ async def req(ws,p):
         if m.get("error"): raise RuntimeError(m["error"].get("message","Deriv API error"))
         if m.get("req_id")==p["req_id"]: return m
 
+async def fetch_candles(ws, symbol, tf, count, req_id, page_size=1000):
+    """Fetch closed OHLC history in backward pages; tolerate API page caps."""
+    if count < 1 or page_size < 2:
+        raise ValueError("count and page_size must be positive")
+    sec = TF[tf]
+    collected = {}
+    end = "latest"
+    last_earliest = None
+    raw_count = 0
+    while len(collected) < count + 2:
+        ask = min(page_size, count + 2 - len(collected))
+        data = await req(ws, {
+            "ticks_history": symbol, "end": end, "count": ask,
+            "style": "candles", "granularity": sec, "req_id": req_id,
+        })
+        req_id += 1
+        page = data.get("candles", []) or []
+        if not page:
+            break
+        before = len(collected)
+        for row in page:
+            try:
+                epoch = int(row["epoch"])
+                collected[epoch] = row
+            except (KeyError, TypeError, ValueError):
+                continue
+        raw_count += len(page)
+        earliest = min(collected) if collected else None
+        if len(collected) == before or earliest is None or earliest == last_earliest:
+            break
+        last_earliest = earliest
+        end = earliest - 1
+        if len(page) < 1:
+            break
+        if raw_count > count * 4 + 100:
+            raise RuntimeError(f"{tf}: pagination safety limit reached; collected={len(collected)}")
+    now = int(datetime.now(timezone.utc).timestamp())
+    rows = validate([collected[t] for t in sorted(collected)], tf, now)
+    return rows[-count:]
+
+
 async def market():
     async with websockets.connect(WS,open_timeout=20,ping_interval=20) as ws:
         d=await req(ws,{"active_symbols":"brief","req_id":1})
@@ -62,12 +103,26 @@ async def market():
                 for x in raw_symbols[:12]]
         raise RuntimeError(f"Deriv active_symbols returned {len(raw_symbols)} symbols but no Step Index match; sample={sample}")
     sym=next((x for x in symbols if x["name"].lower()=="step index"),symbols[0])
+    requested={"M1":5000,"M5":5000,"M15":2500,"H1":1200,"H4":700}
     frames={}
     async with websockets.connect(WS,open_timeout=20,ping_interval=20) as ws:
-        for i,(tf,count) in enumerate((("M1",5000),("M5",5000),("M15",2500),("H1",1200),("H4",700)),10):
-            d=await req(ws,{"ticks_history":sym["symbol"],"end":"latest","count":count,"style":"candles","granularity":TF[tf],"req_id":i})
-            frames[tf]=validate(d.get("candles",[]),tf,int(datetime.now(timezone.utc).timestamp()))
-    return sym,frames
+        for i,(tf,count) in enumerate(requested.items(),10):
+            frames[tf]=await fetch_candles(ws,sym["symbol"],tf,count,i*1000)
+    diagnostics={}
+    for tf,rows in frames.items():
+        epochs=[r["epoch"] for r in rows]
+        gaps=[(b-a)//TF[tf] for a,b in zip(epochs,epochs[1:]) if b-a>TF[tf]]
+        diagnostics[tf]={
+            "requested_closed":requested[tf],
+            "received_closed":len(rows),
+            "shortfall":max(0,requested[tf]-len(rows)),
+            "duplicate_epochs_removed":False,
+            "gap_count":len(gaps),
+            "max_gap_bars":max(gaps,default=1),
+            "first_epoch":epochs[0] if epochs else None,
+            "last_epoch":epochs[-1] if epochs else None,
+        }
+    return sym,frames,diagnostics
 
 def detect(f):
     need={"M1":40,"M5":40,"M15":30,"H1":30}
@@ -95,8 +150,8 @@ def detect(f):
     return {"state":"TRIGGER_CONFIRMED_NEXT_M1_OPEN","confirmed":True,"direction":bias,"reference_close":entry,"stop_reference":stop,"target_1R":entry+(entry-stop) if bias=="LONG" else entry-(stop-entry),"target_1_5R":entry+1.5*(entry-stop) if bias=="LONG" else entry-1.5*(stop-entry),"atr14_m1":vol,"decision_epoch":cur["epoch"]+60,"entry_rule":"next M1 open"}
 
 def main():
-    sym,frames=asyncio.run(market()); setup=detect(frames)
-    report={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"symbol":sym,"source":"Deriv public OHLC, closed candles only","read_only":True,"data_counts":{k:len(v) for k,v in frames.items()},"last_closed":{k:v[-1] if v else None for k,v in frames.items()},"setup":setup,"warning":"A trigger is a research signal, not a profitability estimate. Validate execution costs and OOS statistics before use."}
+    sym,frames,diagnostics=asyncio.run(market()); setup=detect(frames)
+    report={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"symbol":sym,"source":"Deriv public OHLC, closed candles only","read_only":True,"data_counts":{k:len(v) for k,v in frames.items()},"data_diagnostics":diagnostics,"last_closed":{k:v[-1] if v else None for k,v in frames.items()},"setup":setup,"warning":"A trigger is a research signal, not a profitability estimate. Validate execution costs and OOS statistics before use."}
     Path("DATA").mkdir(exist_ok=True); Path("DATA/step_index_scalping_v23.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
     print(json.dumps({"symbol":sym,"counts":report["data_counts"],"setup":setup},indent=2))
 if __name__=="__main__": main()
