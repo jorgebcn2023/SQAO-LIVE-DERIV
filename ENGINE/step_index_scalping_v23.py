@@ -48,8 +48,19 @@ async def req(ws,p):
 async def market():
     async with websockets.connect(WS,open_timeout=20,ping_interval=20) as ws:
         d=await req(ws,{"active_symbols":"brief","req_id":1})
-    symbols=[{"symbol":str(x.get("symbol","")),"name":str(x.get("display_name",""))} for x in d.get("active_symbols",[]) if "step index" in (str(x.get("display_name",""))+" "+str(x.get("symbol",""))).lower()]
-    if not symbols: raise RuntimeError("Deriv returned no active Step Index symbol")
+    # Deriv current schema uses underlying_symbol/name; retain legacy fallbacks.
+    raw_symbols=d.get("active_symbols",[])
+    symbols=[]
+    for item in raw_symbols:
+        code=str(item.get("underlying_symbol") or item.get("symbol") or "").strip()
+        name=str(item.get("underlying_symbol_name") or item.get("display_name") or "").strip()
+        if code and "step index" in (name+" "+code).lower():
+            symbols.append({"symbol":code,"name":name or code})
+    if not symbols:
+        sample=[{"code":str(x.get("underlying_symbol") or x.get("symbol") or ""),
+                 "name":str(x.get("underlying_symbol_name") or x.get("display_name") or "")}
+                for x in raw_symbols[:12]]
+        raise RuntimeError(f"Deriv active_symbols returned {len(raw_symbols)} symbols but no Step Index match; sample={sample}")
     sym=next((x for x in symbols if x["name"].lower()=="step index"),symbols[0])
     frames={}
     async with websockets.connect(WS,open_timeout=20,ping_interval=20) as ws:
