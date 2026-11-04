@@ -97,14 +97,22 @@ def replay(frames,cost=None):
         exit_price=None; reason="TIME_EXIT"
         # Entry is i+1. Evaluate exactly 20 bars: i+1 through i+20 inclusive.
         end=min(len(m1)-1,i+MAX_HOLD_M1_BARS)
+        exit_index=end
         for j in range(i+1,end+1):
             high,low=float(m1[j]["high"]),float(m1[j]["low"])
+            if not all(math.isfinite(v) for v in (high,low)) or high < low:
+                raise ValueError(f"Invalid M1 OHLC at epoch {m1[j].get('epoch')}")
             stop_hit=low<=stop if side=="LONG" else high>=stop
             target_hit=high>=target if side=="LONG" else low<=target
+            # Conservative intrabar assumption: if both are touched, stop wins.
             if stop_hit:
-                exit_price=stop; reason="STOP_FIRST" if target_hit else "STOP"; break
-            if target_hit: exit_price=target; reason="TARGET"; break
-        if exit_price is None: exit_price=float(m1[end]["close"])
+                exit_price=stop; reason="STOP_FIRST" if target_hit else "STOP"; exit_index=j; break
+            if target_hit:
+                exit_price=target; reason="TARGET"; exit_index=j; break
+        if exit_price is None:
+            exit_price=float(m1[end]["close"])
+        if not math.isfinite(exit_price) or exit_price<=0:
+            raise ValueError(f"Invalid exit price at epoch {m1[exit_index].get('epoch')}")
         gross_r=r_multiple(entry,exit_price,risk,side)
         cost_r=float(cost)/risk if cost is not None else None
         net_r=gross_r-cost_r if cost_r is not None else None
@@ -119,7 +127,7 @@ def replay(frames,cost=None):
         trades.append({"signal_epoch":decision,"entry_epoch":int(m1[i+1]["epoch"]),"direction":side,
             "entry":entry,"exit":exit_price,"stop":stop,"target":target,"risk_price_units":risk,
             "gross_r":gross_r,"round_trip_cost_price_units":cost,"cost_r":cost_r,"net_r":net_r,
-            "exit_reason":reason,"holding_bars_m1":j-i if 'j' in locals() else end-i,
+            "exit_reason":reason,"holding_bars_m1":exit_index-i,
             "monetary_scenarios":scenarios})
         next_i=j+1
     n=len(trades); split=int(n*.60); valid=int(n*.80)
@@ -149,19 +157,48 @@ def build_table17(live_path, gross_oos, net_oos, cost_status, eligibility):
         live = {}
     setup = live.get("setup") or {}
     levels = setup.get("execution_levels") or {}
+    # Independently revalidate every live execution field. Never trust a
+    # detector's boolean alone or coerce malformed values into an executable row.
+    numeric = {}
+    try:
+        for key in ("entry", "stop_loss", "take_profit", "risk_price_units", "reward_price_units"):
+            value = float(levels[key])
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(key)
+            numeric[key] = value
+        expected_epoch = int(setup["decision_epoch"])
+        next_epoch = int((live.get("next_m1_open") or {})["epoch"])
+        entry_epoch = int((live.get("next_m1_open") or {})["epoch"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        numeric = {}
+        expected_epoch = next_epoch = entry_epoch = None
+    direction = setup.get("direction")
+    entry0 = numeric.get("entry")
+    stop0 = numeric.get("stop_loss")
+    target0 = numeric.get("take_profit")
+    risk0 = numeric.get("risk_price_units")
+    reward0 = numeric.get("reward_price_units")
+    geometry_ok = bool(
+        numeric and direction in {"LONG", "SHORT"}
+        and abs(abs(entry0 - stop0) - risk0) <= max(1e-8, risk0 * 1e-6)
+        and abs(abs(target0 - entry0) - reward0) <= max(1e-8, reward0 * 1e-6)
+        and ((stop0 < entry0 < target0) if direction == "LONG" else (target0 < entry0 < stop0))
+        and abs(reward0 / risk0 - TARGET_R) <= 1e-6
+    )
     confirmed = bool(
         setup.get("confirmed") is True
         and setup.get("execution_price_confirmed") is True
         and setup.get("status") == "CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION"
-        and setup.get("direction") in {"LONG", "SHORT"}
+        and direction in {"LONG", "SHORT"}
         and eligibility.get("eligible") is True
-        and all(levels.get(k) is not None for k in ("entry", "stop_loss", "take_profit", "risk_price_units", "reward_price_units"))
+        and geometry_ok
+        and expected_epoch is not None and next_epoch == expected_epoch
     )
-    entry = float(levels["entry"]) if confirmed else None
-    stop = float(levels["stop_loss"]) if confirmed else None
-    target = float(levels["take_profit"]) if confirmed else None
-    risk = float(levels["risk_price_units"]) if confirmed else None
-    reward = float(levels["reward_price_units"]) if confirmed else None
+    entry = entry0 if confirmed else None
+    stop = stop0 if confirmed else None
+    target = target0 if confirmed else None
+    risk = risk0 if confirmed else None
+    reward = reward0 if confirmed else None
     monetary = {}
     if confirmed:
         for lots in (0.10, 0.20):
@@ -188,7 +225,7 @@ def build_table17(live_path, gross_oos, net_oos, cost_status, eligibility):
         "risk_reward": levels.get("risk_reward") if confirmed else None,
         "atr14_m1": setup.get("atr14_m1"),
         "signal_epoch": setup.get("decision_epoch"),
-        "entry_epoch": (live.get("next_m1_open") or {}).get("epoch") if confirmed else None,
+        "entry_epoch": entry_epoch if confirmed else None,
         "holding_limit_m1_bars": MAX_HOLD_M1_BARS,
         "position_size_scenarios": monetary,
         "position_size_note": "No account balance or user risk fraction is configured; lot size is shown only as explicit scenarios, not a personalized size.",
@@ -200,7 +237,7 @@ def build_table17(live_path, gross_oos, net_oos, cost_status, eligibility):
         "historical_exact_rule_net_oos": net_oos,
         "historical_eligibility": eligibility,
         "execution_warning": "READ_ONLY research output. No orders are sent. Do not treat provisional USD estimates as verified broker risk.",
-        "no_trade_reason": None if confirmed else setup.get("state", "NO_CONFIRMED_LIVE_TRIGGER_OR_NEXT_M1_OPEN")
+        "no_trade_reason": None if confirmed else ("STATISTICAL_ELIGIBILITY_BLOCKED" if eligibility.get("eligible") is not True else "LIVE_TRIGGER_LEVELS_OR_EXACT_NEXT_M1_EPOCH_INVALID")
     }
 
 
