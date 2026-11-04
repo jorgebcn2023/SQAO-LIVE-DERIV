@@ -19,7 +19,7 @@ from pathlib import Path
 import websockets
 
 PUBLIC_WS = "wss://api.derivws.com/trading/v1/options/ws/public"
-TIMEFRAME_LABELS = {1: "M1", 5: "M5", 15: "M15", 60: "H1", 240: "H4"}
+TIMEFRAME_LABELS = {1: "M1", 5: "M5", 15: "M15", 60: "H1", 240: "H4", 1440: "D1"}
 
 
 @dataclass
@@ -38,7 +38,7 @@ class Candle:
 class CandleAggregator:
     """Build completed OHLC candles for every timeframe consumed by SQAO."""
 
-    def __init__(self, timeframes=(1, 5, 15, 60, 240)):
+    def __init__(self, timeframes=(1, 5, 15, 60, 240, 1440)):
         unknown = set(timeframes) - set(TIMEFRAME_LABELS)
         if unknown:
             raise ValueError(f"Unsupported candle timeframes: {sorted(unknown)}")
@@ -107,6 +107,7 @@ async def seed_history(ws, symbol: str, output: Path, count: int = 500):
         (15, 900, "M15"),
         (60, 3600, "H1"),
         (240, 14400, "H4"),
+        (1440, 86400, "D1"),
     ):
         req_id = 1100 + tf
         payload = {
