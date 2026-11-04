@@ -103,7 +103,7 @@ async def market():
                 for x in raw_symbols[:12]]
         raise RuntimeError(f"Deriv active_symbols returned {len(raw_symbols)} symbols but no Step Index match; sample={sample}")
     sym=next((x for x in symbols if x["name"].lower()=="step index"),symbols[0])
-    requested={"M1":5000,"M5":5000,"M15":2500,"H1":1200,"H4":700}
+    requested={"M1":int(os.getenv("SQAO_SCALP_CANDLES_M1","20000")),"M5":int(os.getenv("SQAO_SCALP_CANDLES_M5","20000")),"M15":int(os.getenv("SQAO_SCALP_CANDLES_M15","7000")),"H1":int(os.getenv("SQAO_SCALP_CANDLES_H1","2500")),"H4":int(os.getenv("SQAO_SCALP_CANDLES_H4","1000"))}
     frames={}
     async with websockets.connect(WS,open_timeout=20,ping_interval=20) as ws:
         for i,(tf,count) in enumerate(requested.items(),10):
