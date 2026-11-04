@@ -1,5 +1,5 @@
 import unittest
-from ENGINE.step_index_scalping_v23_backtest import stats, wilson, r_multiple, replay, _monetary, statistical_gate, MAX_HOLD_M1_BARS
+from ENGINE.step_index_scalping_v23_backtest import stats, wilson, r_multiple, replay, _monetary, statistical_gate, MAX_HOLD_M1_BARS, next_m1_entry
 
 class BacktestV23Tests(unittest.TestCase):
     def test_wilson_bounds(self):
@@ -36,10 +36,10 @@ class BacktestV23Tests(unittest.TestCase):
     def test_max_holding_bars_is_20(self):
         self.assertEqual(MAX_HOLD_M1_BARS,20)
 
-    def test_backtest_rejects_nonconsecutive_next_m1_epoch(self):
-        # Live mode requires the next M1 candle to open exactly at signal close.
-        signal_epoch = 120
-        next_available_epoch = 180
-        self.assertNotEqual(next_available_epoch, signal_epoch)
+    def test_backtest_requires_exact_next_m1_epoch(self):
+        rows = [{"epoch": 60, "open": 10.0}, {"epoch": 120, "open": 11.0}]
+        self.assertEqual(next_m1_entry(rows, 0, 120), 11.0)
+        self.assertIsNone(next_m1_entry(rows, 0, 180))
+        self.assertIsNone(next_m1_entry(rows, 1, 180))
 
 if __name__=="__main__": unittest.main()
