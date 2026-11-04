@@ -91,7 +91,7 @@ def test_backtest_rejects_unvalidated_costs():
 def test_executive_pdf_generation():
     import tempfile
     from pathlib import Path
-    from ENGINE.step_index_research import indicator_snapshot, log_distribution, write_pdf
+    from ENGINE.step_index_research import indicator_snapshot, log_distribution, write_pdf, generate_mtf_charts
     rows = []
     for i in range(120):
         close = 7350.0 + i * 0.15 + 0.3 * math.sin(i / 4)
@@ -115,8 +115,14 @@ def test_executive_pdf_generation():
         },
     }
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "step-index-test.pdf"
-        write_pdf(report, path)
+        out = Path(tmp)
+        frames = {tf: [{**row, "epoch": 1_700_000_000 + i * seconds} for i, row in enumerate(rows)]
+                  for tf, seconds in (("M1",60),("M5",300),("M15",900),("H1",3600),("H4",14400))}
+        charts = generate_mtf_charts(frames, out)
+        assert set(charts) == {"M1","M5","M15","H1","H4"}
+        assert all(Path(p).is_file() and Path(p).stat().st_size > 5000 for p in charts.values())
+        path = out / "step-index-test.pdf"
+        write_pdf(report, path, charts)
         assert path.is_file()
         assert path.stat().st_size > 3000
 
