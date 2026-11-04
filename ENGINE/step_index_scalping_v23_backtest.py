@@ -121,7 +121,7 @@ def replay(frames,cost=None):
             "gross_r":gross_r,"round_trip_cost_price_units":cost,"cost_r":cost_r,"net_r":net_r,
             "exit_reason":reason,"holding_bars_m1":j-i if 'j' in locals() else end-i,
             "monetary_scenarios":scenarios})
-        next_i=end+1
+        next_i=j+1
     n=len(trades); split=int(n*.60); valid=int(n*.80)
     def split_stats(vals):
         if vals is None: return {"all":None,"train":None,"validation":None,"oos":None}
