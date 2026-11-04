@@ -80,6 +80,7 @@ jobs:
           SQAO_STEP_CANDLES_M5: '20000'
           SQAO_STEP_CANDLES_M15: '7000'
           SQAO_STEP_CANDLES_H1: '2500'
+          SQAO_STEP_CANDLES_H4: '1500'
           SQAO_STEP_CANDLES_D1: '1000'
           SQAO_STEP_CANDLES_W1: '260'
           SQAO_STEP_HORIZON_M5: '5'
@@ -139,6 +140,10 @@ jobs:
           for name in ['step_index_quant_report.pdf','step_index_strategy_lab.pdf','step_index_arima_mc.pdf','step_index_table17.pdf']:
               if not Path('DATA', name).is_file() or Path('DATA', name).stat().st_size < 1000:
                   raise SystemExit(f'Missing/invalid PDF: {name}')
+          for tf in ['m1','m5','m15','h1','h4']:
+              chart = Path('DATA', f'step_index_chart_{tf}.png')
+              if not chart.is_file() or chart.stat().st_size < 5000:
+                  raise SystemExit(f'Missing/invalid MTF chart: {chart}')
           if data.get('decision') not in {'NO_TRADE', 'CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION'}:
               raise SystemExit('Unexpected baseline decision state')
           if lab.get('decision') not in {'NO_TRADE', 'CANDIDATE_FOR_REVIEW'} or len(lab.get('strategies', [])) != 3:
