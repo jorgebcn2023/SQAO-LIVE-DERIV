@@ -141,19 +141,80 @@ def replay(frames,cost=None):
         "trades":trades}
 
 
+def build_table17(live_path, gross_oos, net_oos, cost_status, eligibility):
+    """Operational Table 17: exact live levels only when the next-M1 entry is confirmed."""
+    try:
+        live = json.loads(Path(live_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        live = {}
+    setup = live.get("setup") or {}
+    levels = setup.get("execution_levels") or {}
+    confirmed = bool(
+        setup.get("confirmed") is True
+        and setup.get("execution_price_confirmed") is True
+        and setup.get("status") == "CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION"
+        and setup.get("direction") in {"LONG", "SHORT"}
+        and all(levels.get(k) is not None for k in ("entry", "stop_loss", "take_profit", "risk_price_units", "reward_price_units"))
+    )
+    entry = float(levels["entry"]) if confirmed else None
+    stop = float(levels["stop_loss"]) if confirmed else None
+    target = float(levels["take_profit"]) if confirmed else None
+    risk = float(levels["risk_price_units"]) if confirmed else None
+    reward = float(levels["reward_price_units"]) if confirmed else None
+    monetary = {}
+    if confirmed:
+        for lots in (0.10, 0.20):
+            monetary[f"{lots:.2f}"] = {
+                "lots": lots,
+                "risk_usd_provisional": round(_monetary(risk, lots), 4),
+                "target_profit_usd_gross_provisional": round(_monetary(reward, lots), 4),
+                "conversion_status": "PROVISIONAL_USER_DECLARED_NOT_BROKER_VERIFIED"
+            }
+    return {
+        "table": 17,
+        "instrument": "Step Index 100",
+        "deriv_symbol": live.get("symbol", {}).get("symbol", "stpRNG"),
+        "decision": "CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION" if confirmed else "NO_TRADE",
+        "signal_confirmed": bool(setup.get("confirmed")),
+        "execution_price_confirmed": confirmed,
+        "direction": setup.get("direction") if confirmed else None,
+        "entry_type": "NEXT_M1_CANDLE_OPEN" if confirmed else None,
+        "entry_price": entry,
+        "stop_loss": stop,
+        "take_profit": target,
+        "risk_price_units": risk,
+        "reward_price_units": reward,
+        "risk_reward": levels.get("risk_reward") if confirmed else None,
+        "atr14_m1": setup.get("atr14_m1"),
+        "signal_epoch": setup.get("decision_epoch"),
+        "entry_epoch": (live.get("next_m1_open") or {}).get("epoch") if confirmed else None,
+        "holding_limit_m1_bars": MAX_HOLD_M1_BARS,
+        "position_size_scenarios": monetary,
+        "position_size_note": "No account balance or user risk fraction is configured; lot size is shown only as explicit scenarios, not a personalized size.",
+        "monetary_conversion": "USD 0.10 per 0.1 price units at 0.10 lots; user-declared and not broker tick-value verified.",
+        "commission_verified": False,
+        "slippage_verified": False,
+        "round_trip_cost_status": cost_status,
+        "historical_exact_rule_gross_oos": gross_oos,
+        "historical_exact_rule_net_oos": net_oos,
+        "historical_eligibility": eligibility,
+        "execution_warning": "READ_ONLY research output. No orders are sent. Do not treat provisional USD estimates as verified broker risk.",
+        "no_trade_reason": None if confirmed else setup.get("state", "NO_CONFIRMED_LIVE_TRIGGER_OR_NEXT_M1_OPEN")
+    }
+
+
 def main():
     raw=os.getenv("SQAO_SCALP_ROUND_TRIP_COST_PRICE","").strip(); cost=float(raw) if raw else None
     if cost is not None and (not math.isfinite(cost) or cost<0): raise SystemExit("Invalid round-trip cost")
     sym,frames,diagnostics=asyncio.run(market()); bt=replay(frames,cost)
     costs_verified=False  # MT5 evidence does not verify commission and slippage.
     gate=statistical_gate(bt["gross"]["oos"],bt["net"]["oos"],costs_verified=costs_verified)
+    table17=build_table17("DATA/step_index_scalping_v23.json",bt["gross"]["oos"],bt["net"]["oos"],bt["cost_model"]["status"],gate)
+    table17["exact_rule_id"]=bt["rule_id"]
     result={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"symbol":sym,
         "source":"Deriv public timestamped OHLC; closed candles only","data_counts":{k:len(v) for k,v in frames.items()},
         "data_diagnostics":diagnostics,"read_only":True,"backtest":bt,
-        "decision":gate["decision"],"eligibility":gate,
-        "table17":{"exact_rule_id":bt["rule_id"],"gross_oos":bt["gross"]["oos"],"net_oos":bt["net"]["oos"],
-            "monetary_scenarios":"Per-trade USD risk/reward/P&L for 0.10 and 0.20 lots in trades[]",
-            "cost_status":bt["cost_model"]["status"],"eligibility":gate}}
+        "decision":gate["decision"],"eligibility":gate,"table17":table17}
     Path("DATA").mkdir(exist_ok=True)
     Path("DATA/step_index_scalping_v23_backtest.json").write_text(json.dumps(result,indent=2,allow_nan=False),encoding="utf-8")
     print(json.dumps({"symbol":sym,"counts":result["data_counts"],"gross_oos":bt["gross"]["oos"],
