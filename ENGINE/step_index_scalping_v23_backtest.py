@@ -28,22 +28,23 @@ def stats(rs):
             "profit_factor":gp/gl if gl else None,"max_drawdown_r":dd,"total_r":sum(rs)}
 
 
-def statistical_gate(metrics, min_trades=MIN_OOS_TRADES, target=TARGET_WIN_RATE):
-    n=metrics.get("n") or 0
-    wr=metrics.get("win_rate")
-    ci=metrics.get("wilson95") or [None,None]
-    exp=metrics.get("expectancy_r")
-    pf=metrics.get("profit_factor")
-    passed = bool(n >= min_trades and wr is not None and wr >= target
-                  and ci[0] is not None and ci[0] >= target
-                  and exp is not None and exp > 0 and pf is not None and pf > 1)
-    return {"eligible":passed,"decision":"ELIGIBLE" if passed else "NO_TRADE",
-            "minimum_oos_trades":min_trades,"target_win_rate":target,
-            "checks":{"minimum_sample":n >= min_trades,"observed_win_rate":wr is not None and wr >= target,
-                      "wilson_lower_bound":ci[0] is not None and ci[0] >= target,
-                      "positive_expectancy":exp is not None and exp > 0,
-                      "profit_factor_above_one":pf is not None and pf > 1}}
-
+def statistical_gate(metrics, net_metrics=None, costs_verified=False, min_trades=MIN_OOS_TRADES, target=TARGET_WIN_RATE):
+    """Eligibility requires net OOS performance after independently verified all-in costs."""
+    n=(net_metrics or {}).get("n") or 0
+    wr=(net_metrics or {}).get("win_rate")
+    ci=(net_metrics or {}).get("wilson95") or [None,None]
+    exp=(net_metrics or {}).get("expectancy_r")
+    pf=(net_metrics or {}).get("profit_factor")
+    gross_n=(metrics or {}).get("n") or 0
+    passed=bool(costs_verified and n>=min_trades and gross_n>=min_trades and wr is not None and wr>=target and ci[0] is not None and ci[0]>=target and exp is not None and exp>0 and pf is not None and pf>1)
+    return {"eligible":passed,"decision":"ELIGIBLE" if passed else "NO_TRADE","minimum_oos_trades":min_trades,"target_win_rate":target,
+            "eligibility_basis":"NET_OOS_AFTER_VERIFIED_ALL_IN_COSTS",
+            "checks":{"costs_verified":bool(costs_verified),"net_metrics_available":net_metrics is not None,
+                      "minimum_sample":n>=min_trades and gross_n>=min_trades,
+                      "observed_net_win_rate":wr is not None and wr>=target,
+                      "net_wilson_lower_bound":ci[0] is not None and ci[0]>=target,
+                      "positive_net_expectancy":exp is not None and exp>0,
+                      "net_profit_factor_above_one":pf is not None and pf>1}}
 
 def r_multiple(entry, exit_price, risk, side):
     if risk<=0: raise ValueError("risk must be positive")
@@ -125,7 +126,7 @@ def main():
     raw=os.getenv("SQAO_SCALP_ROUND_TRIP_COST_PRICE","").strip(); cost=float(raw) if raw else None
     if cost is not None and (not math.isfinite(cost) or cost<0): raise SystemExit("Invalid round-trip cost")
     sym,frames,diagnostics=asyncio.run(market()); bt=replay(frames,cost)
-    gate=statistical_gate(bt["gross"]["oos"])
+    costs_verified=False  # MT5 evidence does not verify commission and slippage.\n    gate=statistical_gate(bt["gross"]["oos"],bt["net"]["oos"],costs_verified=costs_verified)
     result={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"symbol":sym,
         "source":"Deriv public timestamped OHLC; closed candles only","data_counts":{k:len(v) for k,v in frames.items()},
         "data_diagnostics":diagnostics,"read_only":True,"backtest":bt,
