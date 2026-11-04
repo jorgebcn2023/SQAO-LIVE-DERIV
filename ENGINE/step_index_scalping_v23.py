@@ -182,12 +182,23 @@ def synchronize_frames(frames, decision_epoch):
     return aligned
 
 
+def contiguous_tail(rows, tf, minimum):
+    """Require a gap-free, strictly ordered tail before calculating a live signal."""
+    if len(rows) < minimum:
+        return False
+    epochs = [int(row["epoch"]) for row in rows[-minimum:]]
+    step = TF[tf]
+    return all(b - a == step for a, b in zip(epochs, epochs[1:]))
+
+
 def detect(f, next_open=None):
-    need={"M1":40,"M5":40,"M15":30,"H1":30}
+    need={"M1":40,"M5":40,"M15":30,"H1":30,"H4":30}
     if any(len(f.get(k,[]))<n for k,n in need.items()):return {"state":"INSUFFICIENT_DATA","confirmed":False}
+    if any(not contiguous_tail(f[k],k,n) for k,n in need.items()):
+        return {"state":"DATA_GAP_BLOCK","confirmed":False,"status":"NO_TRADE"}
     m1,m5=f["M1"],f["M5"]; bias=direction(f["H1"][-100:]); mid=direction(f["M15"][-100:])
-    h4=direction(f["H4"][-100:]) if len(f.get("H4",[]))>=30 else None
-    if not bias or bias!=mid or (h4 and h4!=bias):return {"state":"MTF_CONFLICT","confirmed":False}
+    h4=direction(f["H4"][-100:])
+    if not bias or bias!=mid or not h4 or h4!=bias:return {"state":"MTF_CONFLICT","confirmed":False}
     c=[r["close"] for r in m5[-100:]]
     e10,e20=ema(c,10),ema(c,20); last=m5[-1]
     if e10 is None or e20 is None:return {"state":"INSUFFICIENT_DATA","confirmed":False}
