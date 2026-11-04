@@ -154,6 +154,7 @@ def build_table17(live_path, gross_oos, net_oos, cost_status, eligibility):
         and setup.get("execution_price_confirmed") is True
         and setup.get("status") == "CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION"
         and setup.get("direction") in {"LONG", "SHORT"}
+        and eligibility.get("eligible") is True
         and all(levels.get(k) is not None for k in ("entry", "stop_loss", "take_profit", "risk_price_units", "reward_price_units"))
     )
     entry = float(levels["entry"]) if confirmed else None
