@@ -260,7 +260,23 @@ def main():
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
     from reportlab.lib.styles import getSampleStyleSheet
     styles=getSampleStyleSheet()
-    fields=[("Estado",table17.get("decision")),("Dirección",table17.get("direction")),("Entrada",table17.get("entry_price")),("Stop Loss",table17.get("stop_loss")),("Take Profit",table17.get("take_profit")),("Riesgo precio",table17.get("risk_price_units")),("Beneficio objetivo",table17.get("reward_price_units")),("R:R",table17.get("risk_reward")),("Escenarios lotes/USD",json.dumps(table17.get("position_size_scenarios",{}))),("Costes",table17.get("round_trip_cost_status")),("Motivo NO_TRADE",table17.get("no_trade_reason"))]
+    oos=bt["gross"].get("oos") or {}
+    net_oos=bt["net"].get("oos") if bt.get("net") else None
+    ci=oos.get("wilson95") or [None,None]
+    fields=[
+        ("Decisión",table17.get("decision")),("Dirección",table17.get("direction")),
+        ("Entrada M1",table17.get("entry_price")),("Stop Loss",table17.get("stop_loss")),
+        ("Take Profit",table17.get("take_profit")),("Riesgo (precio)",table17.get("risk_price_units")),
+        ("Beneficio objetivo (precio)",table17.get("reward_price_units")),("Relación R:R",table17.get("risk_reward")),
+        ("Límite de permanencia (M1)",table17.get("holding_limit_m1_bars")),
+        ("Escenarios lotaje/USD",json.dumps(table17.get("position_size_scenarios",{}),ensure_ascii=False)),
+        ("OOS bruto · operaciones",oos.get("n")),("OOS bruto · acierto",oos.get("win_rate")),
+        ("OOS bruto · IC Wilson 95%",ci),("OOS bruto · expectativa R",oos.get("expectancy_r")),
+        ("OOS bruto · Profit Factor",oos.get("profit_factor")),("OOS bruto · drawdown R",oos.get("max_drawdown_r")),
+        ("OOS neto",net_oos),("Costes",table17.get("round_trip_cost_status")),
+        ("Elegibilidad estadística",json.dumps(table17.get("historical_eligibility",{}),ensure_ascii=False)),
+        ("Motivo NO_TRADE",table17.get("no_trade_reason")),
+    ]
     data=[["CAMPO","VALOR"]]+[[k,"—" if v is None else str(v)] for k,v in fields]
     pdf_table=Table(data,colWidths=[150,350],repeatRows=1)
     pdf_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#263445")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.4,colors.grey),("VALIGN",(0,0),(-1,-1),"TOP"),("FONTSIZE",(0,0),(-1,-1),8)]))
