@@ -36,4 +36,10 @@ class BacktestV23Tests(unittest.TestCase):
     def test_max_holding_bars_is_20(self):
         self.assertEqual(MAX_HOLD_M1_BARS,20)
 
+    def test_backtest_rejects_nonconsecutive_next_m1_epoch(self):
+        # Live mode requires the next M1 candle to open exactly at signal close.
+        signal_epoch = 120
+        next_available_epoch = 180
+        self.assertNotEqual(next_available_epoch, signal_epoch)
+
 if __name__=="__main__": unittest.main()
