@@ -145,6 +145,7 @@ jobs:
           path: |
             DATA/step_index_scalping_v23.json
             DATA/step_index_scalping_v23_backtest.json
+            DATA/step_index_table17.pdf
             DATA/step_index_mt5_cost_audit.json
             DATA/step_index_quant_report.pdf
             DATA/step_index_quant_report.json
