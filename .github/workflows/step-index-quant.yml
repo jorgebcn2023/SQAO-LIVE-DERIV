@@ -124,6 +124,18 @@ jobs:
           lab = json.loads(Path('DATA/step_index_strategy_lab.json').read_text(encoding='utf-8'))
           am = json.loads(Path('DATA/step_index_arima_mc.json').read_text(encoding='utf-8'))
           audit = json.loads(Path('DATA/step_index_mt5_cost_audit.json').read_text(encoding='utf-8'))
+          scalp = json.loads(Path('DATA/step_index_scalping_v23_backtest.json').read_text(encoding='utf-8'))
+          table17 = scalp.get('table17', {})
+          if scalp.get('read_only') is not True:
+              raise SystemExit('Scalping backtest must remain read-only')
+          if table17.get('decision') == 'NO_TRADE':
+              forbidden = ('entry_price', 'stop_loss', 'take_profit', 'risk_price_units', 'reward_price_units')
+              if any(table17.get(key) is not None for key in forbidden):
+                  raise SystemExit('NO_TRADE Table 17 must not contain executable price levels')
+          if table17.get('decision') != 'CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION' and table17.get('position_size_scenarios'):
+              raise SystemExit('Non-eligible Table 17 must not publish lot sizing scenarios')
+          if scalp.get('eligibility', {}).get('eligible') is not True and table17.get('decision') != 'NO_TRADE':
+              raise SystemExit('Table 17 cannot bypass historical net OOS eligibility')
           for name in ['step_index_quant_report.pdf','step_index_strategy_lab.pdf','step_index_arima_mc.pdf','step_index_table17.pdf']:
               if not Path('DATA', name).is_file() or Path('DATA', name).stat().st_size < 1000:
                   raise SystemExit(f'Missing/invalid PDF: {name}')
