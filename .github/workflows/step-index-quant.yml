@@ -66,8 +66,7 @@ jobs:
           DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
         run: python -m ENGINE.step_index_scalping_v23
 
-      - name: Run v23 chronological scalping backtest when real costs are configured
-        if: vars.SQAO_SCALP_ROUND_TRIP_COST_PRICE != ''
+      - name: Run v23 chronological scalping backtest (gross always; net only with configured costs)
         env:
           DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
           SQAO_SCALP_ROUND_TRIP_COST_PRICE: ${{ vars.SQAO_SCALP_ROUND_TRIP_COST_PRICE }}
