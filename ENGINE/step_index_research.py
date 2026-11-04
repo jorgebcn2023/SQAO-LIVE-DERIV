@@ -347,6 +347,7 @@ def indicator_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
         stoch_values.append(50.0 if hi == lo else 100.0 * (float(rows[i]["close"]) - lo) / (hi - lo))
     stoch_k = stoch_values[-1] if stoch_values else None
     stoch_d = sum(stoch_values[-3:]) / min(3, len(stoch_values)) if stoch_values else None
+    extra = _chart_series(rows) if len(rows) >= 60 else {}
     fib = {}
     if rows:
         hi = max(float(x["high"]) for x in rows[-100:])
@@ -362,7 +363,9 @@ def indicator_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "macd_line": macd_value, "macd_signal": signal_value,
         "macd_histogram": macd_value - signal_value if macd_value is not None and signal_value is not None else None,
         "bollinger20_lower": bb_low, "bollinger20_middle": bb_mid, "bollinger20_upper": bb_high,
-        "stochastic9_k": stoch_k, "stochastic9_d": stoch_d, "adx14": None, "plus_di14": None, "minus_di14": None,
+        "stochastic9_k": stoch_k, "stochastic9_d": stoch_d,
+        "adx14": (extra.get("adx") or [None])[-1], "plus_di14": (extra.get("plus_di") or [None])[-1],
+        "minus_di14": (extra.get("minus_di") or [None])[-1],
         "fibonacci_rolling_100": fib,
     }
 
