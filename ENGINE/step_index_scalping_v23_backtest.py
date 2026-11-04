@@ -217,6 +217,16 @@ def main():
         "decision":gate["decision"],"eligibility":gate,"table17":table17}
     Path("DATA").mkdir(exist_ok=True)
     Path("DATA/step_index_scalping_v23_backtest.json").write_text(json.dumps(result,indent=2,allow_nan=False),encoding="utf-8")
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet
+    styles=getSampleStyleSheet()
+    fields=[("Estado",table17.get("decision")),("Dirección",table17.get("direction")),("Entrada",table17.get("entry_price")),("Stop Loss",table17.get("stop_loss")),("Take Profit",table17.get("take_profit")),("Riesgo precio",table17.get("risk_price_units")),("Beneficio objetivo",table17.get("reward_price_units")),("R:R",table17.get("risk_reward")),("Escenarios lotes/USD",json.dumps(table17.get("position_size_scenarios",{}))),("Costes",table17.get("round_trip_cost_status")),("Motivo NO_TRADE",table17.get("no_trade_reason"))]
+    data=[["CAMPO","VALOR"]]+[[k,"—" if v is None else str(v)] for k,v in fields]
+    pdf_table=Table(data,colWidths=[150,350],repeatRows=1)
+    pdf_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#263445")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.4,colors.grey),("VALIGN",(0,0),(-1,-1),"TOP"),("FONTSIZE",(0,0),(-1,-1),8)]))
+    SimpleDocTemplate("DATA/step_index_table17.pdf",pagesize=A4).build([Paragraph("SQAO — TABLA 17 · SCALPING",styles["Title"]),Paragraph("Step Index 100 · READ-ONLY",styles["Normal"]),Spacer(1,12),pdf_table,Spacer(1,12),Paragraph(table17.get("execution_warning",""),styles["BodyText"])])
     print(json.dumps({"symbol":sym,"counts":result["data_counts"],"gross_oos":bt["gross"]["oos"],
         "net_oos":bt["net"]["oos"],"decision":gate["decision"],"eligibility":gate,
         "cost_status":bt["cost_model"]["status"]},indent=2,allow_nan=False))
