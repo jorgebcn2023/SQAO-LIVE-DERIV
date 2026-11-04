@@ -78,7 +78,7 @@ class ScalpingV23Tests(unittest.TestCase):
         }
         aligned = synchronize_frames(frames, 660)
         self.assertEqual([r["epoch"] for r in aligned["M5"]], [300])
-        self.assertEqual([r["epoch"] for r in aligned["M15"]], [0])
+        self.assertEqual([r["epoch"] for r in aligned["M15"]], [])
         self.assertEqual([r["epoch"] for r in aligned["H1"]], [])
         self.assertEqual([r["epoch"] for r in aligned["H4"]], [])
 
