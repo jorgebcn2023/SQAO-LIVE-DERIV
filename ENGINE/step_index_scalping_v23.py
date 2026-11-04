@@ -116,7 +116,7 @@ async def market():
             "requested_closed":requested[tf],
             "received_closed":len(rows),
             "shortfall":max(0,requested[tf]-len(rows)),
-            "duplicate_epochs_removed":False,
+            "duplicate_epochs_removed":True,
             "gap_count":len(gaps),
             "max_gap_bars":max(gaps,default=1),
             "first_epoch":epochs[0] if epochs else None,
@@ -171,6 +171,17 @@ def execution_levels(direction_value, entry, atr_value, stop_atr=1.2, target_r=1
             "risk_price_units":risk,"reward_price_units":risk*float(target_r),
             "risk_reward":f"1:{float(target_r):g}"}
 
+
+def synchronize_frames(frames, decision_epoch):
+    """Keep only fully closed candles whose close time is <= the M1 decision epoch."""
+    cutoff = int(decision_epoch)
+    aligned = {}
+    for tf, rows in frames.items():
+        sec = TF[tf]
+        aligned[tf] = [r for r in rows if int(r["epoch"]) + sec <= cutoff]
+    return aligned
+
+
 def detect(f, next_open=None):
     need={"M1":40,"M5":40,"M15":30,"H1":30}
     if any(len(f.get(k,[]))<n for k,n in need.items()):return {"state":"INSUFFICIENT_DATA","confirmed":False}
@@ -208,7 +219,12 @@ def detect(f, next_open=None):
             "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION" if executable else "NO_TRADE"}
 
 def main():
-    sym,frames,diagnostics=asyncio.run(market()); next_open=asyncio.run(fetch_current_m1_open(sym["symbol"])); setup=detect(frames,next_open)
+    sym,frames,diagnostics=asyncio.run(market())
+    # Anchor every timeframe to the latest fully closed M1 decision boundary.
+    decision_epoch = int(frames["M1"][-1]["epoch"]) + TF["M1"] if frames.get("M1") else 0
+    aligned_frames = synchronize_frames(frames, decision_epoch)
+    next_open=asyncio.run(fetch_current_m1_open(sym["symbol"]))
+    setup=detect(aligned_frames,next_open)
     report={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"symbol":sym,"source":"Deriv public OHLC, closed candles only","read_only":True,"data_counts":{k:len(v) for k,v in frames.items()},"data_diagnostics":diagnostics,"last_closed":{k:v[-1] if v else None for k,v in frames.items()},"next_m1_open":next_open,"setup":setup,"warning":"A trigger is a research signal, not a profitability estimate. Validate execution costs and OOS statistics before use."}
     Path("DATA").mkdir(exist_ok=True); Path("DATA/step_index_scalping_v23.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
     print(json.dumps({"symbol":sym,"counts":report["data_counts"],"setup":setup},indent=2))
