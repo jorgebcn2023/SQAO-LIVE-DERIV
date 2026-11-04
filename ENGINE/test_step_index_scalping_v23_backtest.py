@@ -22,12 +22,12 @@ class BacktestV23Tests(unittest.TestCase):
         self.assertEqual(gate["decision"],"NO_TRADE")
         self.assertFalse(gate["eligible"])
     def test_gate_requires_lower_wilson_bound(self):
-        gate=statistical_gate({"n":200,"win_rate":.75,"wilson95":[.69,.80],"expectancy_r":.2,"profit_factor":1.5})
+        gate=statistical_gate({"n":200,"win_rate":.75,"wilson95":[.69,.80],"expectancy_r":.2,"profit_factor":1.5}, {"n":200,"win_rate":.75,"wilson95":[.69,.80],"expectancy_r":.2,"profit_factor":1.5}, costs_verified=True)
         self.assertFalse(gate["eligible"])
     def test_gate_eligible_only_with_all_criteria(self):
-        gate=statistical_gate({"n":200,"win_rate":.80,"wilson95":[.74,.85],"expectancy_r":.2,"profit_factor":1.5})
+        good={"n":200,"win_rate":.80,"wilson95":[.74,.85],"expectancy_r":.2,"profit_factor":1.5}\n        gate=statistical_gate(good,good,costs_verified=True)
         self.assertEqual(gate["decision"],"ELIGIBLE")
-    def test_max_holding_bars_is_20(self):
+    def test_gross_only_never_passes_without_verified_costs(self):\n        good={"n":250,"win_rate":.80,"wilson95":[.74,.85],"expectancy_r":.2,"profit_factor":1.5}\n        self.assertFalse(statistical_gate(good,good,costs_verified=False)["eligible"])\n        self.assertFalse(statistical_gate(good,None,costs_verified=True)["eligible"])\n\n    def test_max_holding_bars_is_20(self):
         self.assertEqual(MAX_HOLD_M1_BARS,20)
 
 if __name__=="__main__": unittest.main()
