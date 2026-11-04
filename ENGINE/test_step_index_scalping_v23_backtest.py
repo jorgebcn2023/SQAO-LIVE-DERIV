@@ -1,5 +1,6 @@
-import unittest
-from ENGINE.step_index_scalping_v23_backtest import stats, wilson, r_multiple, replay, _monetary, statistical_gate, MAX_HOLD_M1_BARS, next_m1_entry
+import unittest, json, tempfile
+from pathlib import Path
+from ENGINE.step_index_scalping_v23_backtest import stats, wilson, r_multiple, replay, _monetary, statistical_gate, MAX_HOLD_M1_BARS, next_m1_entry, build_table17
 
 class BacktestV23Tests(unittest.TestCase):
     def test_wilson_bounds(self):
@@ -32,6 +33,37 @@ class BacktestV23Tests(unittest.TestCase):
         good={"n":250,"win_rate":.80,"wilson95":[.74,.85],"expectancy_r":.2,"profit_factor":1.5}
         self.assertFalse(statistical_gate(good,good,costs_verified=False)["eligible"])
         self.assertFalse(statistical_gate(good,None,costs_verified=True)["eligible"])
+
+    def test_table17_no_trade_never_fabricates_levels(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/"live.json"
+            p.write_text(json.dumps({"setup":{"confirmed":False,"state":"BIAS_ONLY_WAIT_PULLBACK"}}))
+            row=build_table17(str(p),{"n":100},None,"BLOCKED",{"decision":"NO_TRADE"})
+            self.assertEqual(row["decision"],"NO_TRADE")
+            self.assertIsNone(row["entry_price"])
+            self.assertIsNone(row["stop_loss"])
+            self.assertEqual(row["position_size_scenarios"],{})
+
+    def test_table17_operational_levels_only_with_exact_confirmed_open(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/"live.json"
+            p.write_text(json.dumps({
+                "symbol":{"symbol":"stpRNG"},
+                "next_m1_open":{"epoch":120},
+                "setup":{"confirmed":True,"execution_price_confirmed":True,
+                    "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION","direction":"LONG",
+                    "decision_epoch":120,"atr14_m1":0.5,
+                    "execution_levels":{"entry":100,"stop_loss":99.4,"take_profit":100.9,
+                        "risk_price_units":0.6,"reward_price_units":0.9,"risk_reward":"1:1.5"}}
+            }))
+            row=build_table17(str(p),{"n":100},None,"BLOCKED",{"decision":"NO_TRADE"})
+            self.assertEqual(row["decision"],"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION")
+            self.assertEqual(row["entry_price"],100)
+            self.assertAlmostEqual(row["stop_loss"],99.4)
+            self.assertAlmostEqual(row["take_profit"],100.9)
+            self.assertIn("0.10",row["position_size_scenarios"])
+            self.assertFalse(row["commission_verified"])
+            self.assertFalse(row["slippage_verified"])
 
     def test_max_holding_bars_is_20(self):
         self.assertEqual(MAX_HOLD_M1_BARS,20)
