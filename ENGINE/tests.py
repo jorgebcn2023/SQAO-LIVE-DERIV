@@ -33,5 +33,5 @@ assert "H1" in {c.timeframe for c in emitted}
 day_boundary = ((base // 86400) + 1) * 86400
 emitted = agg.update(day_boundary, 102.0)
 assert "D1" in {c.timeframe for c in emitted}
-assert set(CandleAggregator().timeframes) == {1, 5, 15, 60, 1440}
+assert set(CandleAggregator().timeframes) == {1, 5, 15, 60, 240, 1440}
 print("SQAO tests: OK")

@@ -67,8 +67,14 @@ jobs:
           import json
           with open('DATA/live_analysis.json', encoding='utf-8') as f:
               data=json.load(f)
-          required={'D1','H1','M15','M5','M1'}
-          if not required.issubset(set(data.get('timeframes', {}))):
+          required={'M1','M5','M15','H1','H4'}
+          if data.get('strategy') != 'SQAO_STEP_INDEX_V23_CANONICAL':
+              raise SystemExit('Live connector is not using canonical v23 detector')
+          if data.get('decision') != 'NO_TRADE' or data.get('read_only') is not True:
+              raise SystemExit('Live connector must fail closed and remain read-only')
+          if data.get('cost_gate') != 'BLOCKED_MISSING_VERIFIABLE_ALL_IN_COST':
+              raise SystemExit('Unverified execution costs must block live eligibility')
+          if not required.issubset(set(data.get('data_counts', {}))):
               raise SystemExit('Incomplete MTF snapshot')
-          print('LIVE_MTF_SNAPSHOT_OK')
+          print('LIVE_V23_MTF_SNAPSHOT_OK')
           PY

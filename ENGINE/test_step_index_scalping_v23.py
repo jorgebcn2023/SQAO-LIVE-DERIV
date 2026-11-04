@@ -1,5 +1,5 @@
 import unittest
-from ENGINE.step_index_scalping_v23 import ema, direction, validate, detect, match_next_m1_open
+from ENGINE.step_index_scalping_v23 import ema, direction, validate, detect, match_next_m1_open, synchronize_frames, contiguous_tail, TF
 
 class ScalpingV23Tests(unittest.TestCase):
     def test_ema(self):
@@ -66,5 +66,37 @@ class ScalpingV23Tests(unittest.TestCase):
         from ENGINE.step_index_scalping_v23 import execution_levels
         self.assertIsNone(execution_levels("SHORT",None,2))
         self.assertIsNone(execution_levels("FLAT",100,2))
+
+
+    def test_detect_requires_h4_context(self):
+        frames = {"M1": [{}] * 40, "M5": [{}] * 40, "M15": [{}] * 30, "H1": [{}] * 30}
+        self.assertEqual(detect(frames)["state"], "INSUFFICIENT_DATA")
+
+    def test_contiguous_tail_blocks_gaps_and_accepts_regular_series(self):
+        regular = [{"epoch": 60*i} for i in range(5)]
+        gap = [{"epoch": 0}, {"epoch": 60}, {"epoch": 180}, {"epoch": 240}, {"epoch": 300}]
+        self.assertTrue(contiguous_tail(regular, "M1", 5))
+        self.assertFalse(contiguous_tail(gap, "M1", 5))
+
+    def test_mtf_alignment_excludes_higher_timeframe_candle_closing_after_decision(self):
+        frames = {
+            "M1": [{"epoch": 600, "close": 1}],
+            "M5": [{"epoch": 300, "close": 1}, {"epoch": 600, "close": 2}],
+            "M15": [{"epoch": 0, "close": 1}],
+            "H1": [{"epoch": 0, "close": 1}],
+            "H4": [{"epoch": 0, "close": 1}],
+        }
+        aligned = synchronize_frames(frames, 660)
+        self.assertEqual([r["epoch"] for r in aligned["M5"]], [300])
+        self.assertEqual([r["epoch"] for r in aligned["M15"]], [])
+        self.assertEqual([r["epoch"] for r in aligned["H1"]], [])
+        self.assertEqual([r["epoch"] for r in aligned["H4"]], [])
+
+    def test_mtf_alignment_is_invariant_to_future_candle_perturbation(self):
+        base = {"M5": [{"epoch": 0, "close": 1}], "M15": [{"epoch": 0, "close": 1}],
+                "H1": [{"epoch": 0, "close": 1}], "H4": [{"epoch": 0, "close": 1}]}
+        changed = {k: list(v) for k, v in base.items()}
+        changed["H1"].append({"epoch": 3600, "close": 999})
+        self.assertEqual(synchronize_frames(base, 600), synchronize_frames(changed, 600))
 
 if __name__=="__main__": unittest.main()

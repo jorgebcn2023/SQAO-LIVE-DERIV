@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -18,7 +19,7 @@ from pathlib import Path
 import websockets
 
 PUBLIC_WS = "wss://api.derivws.com/trading/v1/options/ws/public"
-TIMEFRAME_LABELS = {1: "M1", 5: "M5", 15: "M15", 60: "H1", 1440: "D1"}
+TIMEFRAME_LABELS = {1: "M1", 5: "M5", 15: "M15", 60: "H1", 240: "H4", 1440: "D1"}
 
 
 @dataclass
@@ -37,7 +38,7 @@ class Candle:
 class CandleAggregator:
     """Build completed OHLC candles for every timeframe consumed by SQAO."""
 
-    def __init__(self, timeframes=(1, 5, 15, 60, 1440)):
+    def __init__(self, timeframes=(1, 5, 15, 60, 240, 1440)):
         unknown = set(timeframes) - set(TIMEFRAME_LABELS)
         if unknown:
             raise ValueError(f"Unsupported candle timeframes: {sorted(unknown)}")
@@ -105,6 +106,7 @@ async def seed_history(ws, symbol: str, output: Path, count: int = 500):
         (5, 300, "M5"),
         (15, 900, "M15"),
         (60, 3600, "H1"),
+        (240, 14400, "H4"),
         (1440, 86400, "D1"),
     ):
         req_id = 1100 + tf
@@ -144,20 +146,58 @@ async def seed_history(ws, symbol: str, output: Path, count: int = 500):
     print(f"HISTORY_SEEDED symbol={symbol} count={count} completed_only=true", flush=True)
 
 
-def run_analysis(output: Path):
-    """Write the latest SQAO analysis snapshot without stopping the stream."""
-    try:
-        from ENGINE.live_pipeline import summarize
+def load_engine_frames(output: Path):
+    """Load only completed, timestamped candles for the canonical v23 detector."""
+    frames = {}
+    for tf in ("M1", "M5", "M15", "H1", "H4"):
+        path = output / f"ohlc_{tf}.csv"
+        rows = {}
+        if path.exists():
+            import csv
+            with path.open(newline="", encoding="utf-8") as stream:
+                for row in csv.DictReader(stream):
+                    try:
+                        epoch = int(row["timestamp"])
+                        values = {k: float(row[k]) for k in ("open", "high", "low", "close")}
+                        if not all(math.isfinite(v) for v in values.values()):
+                            continue
+                        rows[epoch] = {"epoch": epoch, **values}
+                    except (KeyError, TypeError, ValueError, OverflowError):
+                        continue
+        frames[tf] = [rows[k] for k in sorted(rows)]
+    return frames
 
-        result = summarize(str(output))
+
+def run_analysis(output: Path, next_open=None):
+    """Use the same v23 detector as research; fail closed without verified costs."""
+    try:
+        from ENGINE.step_index_scalping_v23 import TF, detect, synchronize_frames
+
+        frames = load_engine_frames(output)
+        if not frames["M1"]:
+            result = {"decision": "NO_TRADE", "state": "INSUFFICIENT_DATA"}
+        else:
+            decision_epoch = int(frames["M1"][-1]["epoch"]) + TF["M1"]
+            aligned = synchronize_frames(frames, decision_epoch)
+            setup = detect(aligned, next_open=next_open)
+            result = {
+                "decision": "NO_TRADE",
+                "strategy": "SQAO_STEP_INDEX_V23_CANONICAL",
+                "state": setup.get("state", "NO_TRADE"),
+                "setup": setup,
+                "cost_gate": "BLOCKED_MISSING_VERIFIABLE_ALL_IN_COST",
+                "read_only": True,
+                "decision_epoch": decision_epoch,
+                "data_counts": {tf: len(rows) for tf, rows in aligned.items()},
+                "latest_closed": {tf: rows[-1] if rows else None for tf, rows in aligned.items()},
+            }
+        result["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
         tmp = output / "live_analysis.json.tmp"
         target = output / "live_analysis.json"
         with tmp.open("w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
+            json.dump(result, f, ensure_ascii=False, indent=2, allow_nan=False)
         tmp.replace(target)
-        decision = result.get("decision", "WAIT")
-        age = result.get("latest_data_age_seconds")
-        print(f"ANALYSIS_UPDATED decision={decision} data_age_seconds={age}", flush=True)
+        print(f"ANALYSIS_UPDATED decision=NO_TRADE state={result.get('state')}", flush=True)
     except Exception as exc:
         print(f"ANALYSIS_ERROR: {exc}", flush=True)
 
@@ -213,7 +253,11 @@ async def run():
                     # reading the files for analysis (M5/M15/H1/D1 can close
                     # on the same tick as M1).
                     if any(candle.timeframe == "M1" for candle in emitted):
-                        run_analysis(output)
+                        current_m1 = aggregator.current.get(1)
+                        next_open = None
+                        if current_m1 is not None:
+                            next_open = {"epoch": current_m1.timestamp, "open": current_m1.open}
+                        run_analysis(output, next_open=next_open)
 
                     print(
                         datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat(),
