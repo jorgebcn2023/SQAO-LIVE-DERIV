@@ -66,6 +66,9 @@ def replay(frames,cost=None):
         hist={tf:[r for r in rows if int(r["epoch"])+TF[tf]<=decision] for tf,rows in frames.items()}
         sig=detect(hist)
         if not sig.get("confirmed") or sig.get("direction") not in {"LONG","SHORT"}: continue
+        # Match live execution: only the immediately following M1 epoch is a valid entry.
+        if int(m1[i+1]["epoch"]) != decision:
+            continue
         entry=float(m1[i+1]["open"]); side=sig["direction"]
         levels=sig.get("reference_levels") or {}; stop=levels.get("stop_loss")
         if stop is None: continue
