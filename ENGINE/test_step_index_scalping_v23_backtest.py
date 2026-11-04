@@ -65,6 +65,53 @@ class BacktestV23Tests(unittest.TestCase):
             self.assertFalse(row["commission_verified"])
             self.assertFalse(row["slippage_verified"])
 
+    def test_table17_rejects_wrong_next_m1_epoch(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/"live.json"
+            p.write_text(json.dumps({
+                "symbol":{"symbol":"stpRNG"},"next_m1_open":{"epoch":180},
+                "setup":{"confirmed":True,"execution_price_confirmed":True,
+                    "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION","direction":"LONG",
+                    "decision_epoch":120,
+                    "execution_levels":{"entry":100,"stop_loss":99.4,"take_profit":100.9,
+                        "risk_price_units":0.6,"reward_price_units":0.9,"risk_reward":"1:1.5"}}
+            }))
+            row=build_table17(str(p),{"n":200},{"n":200},"VERIFIED",{"eligible":True})
+            self.assertEqual(row["decision"],"NO_TRADE")
+            self.assertIsNone(row["entry_price"])
+            self.assertEqual(row["no_trade_reason"],"LIVE_TRIGGER_LEVELS_OR_EXACT_NEXT_M1_EPOCH_INVALID")
+
+    def test_table17_rejects_inconsistent_risk_geometry(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/"live.json"
+            p.write_text(json.dumps({
+                "symbol":{"symbol":"stpRNG"},"next_m1_open":{"epoch":120},
+                "setup":{"confirmed":True,"execution_price_confirmed":True,
+                    "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION","direction":"LONG",
+                    "decision_epoch":120,
+                    "execution_levels":{"entry":100,"stop_loss":99.0,"take_profit":100.9,
+                        "risk_price_units":0.6,"reward_price_units":0.9,"risk_reward":"1:1.5"}}
+            }))
+            row=build_table17(str(p),{"n":200},{"n":200},"VERIFIED",{"eligible":True})
+            self.assertEqual(row["decision"],"NO_TRADE")
+            self.assertIsNone(row["stop_loss"])
+
+    def test_table17_never_bypasses_missing_cost_eligibility(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/"live.json"
+            p.write_text(json.dumps({
+                "symbol":{"symbol":"stpRNG"},"next_m1_open":{"epoch":120},
+                "setup":{"confirmed":True,"execution_price_confirmed":True,
+                    "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION","direction":"LONG",
+                    "decision_epoch":120,
+                    "execution_levels":{"entry":100,"stop_loss":99.4,"take_profit":100.9,
+                        "risk_price_units":0.6,"reward_price_units":0.9,"risk_reward":"1:1.5"}}
+            }))
+            row=build_table17(str(p),{"n":200},None,"BLOCKED",{"eligible":False,"decision":"NO_TRADE"})
+            self.assertEqual(row["decision"],"NO_TRADE")
+            self.assertIsNone(row["entry_price"])
+            self.assertEqual(row["no_trade_reason"],"STATISTICAL_ELIGIBILITY_BLOCKED")
+
     def test_max_holding_bars_is_20(self):
         self.assertEqual(MAX_HOLD_M1_BARS,20)
 
