@@ -51,6 +51,21 @@ def r_multiple(entry, exit_price, risk, side):
     return (exit_price-entry)*(1 if side=="LONG" else -1)/risk
 
 
+def next_m1_entry(m1, index, expected_epoch):
+    """Return the next candle open only when its epoch exactly matches the signal close."""
+    if index + 1 >= len(m1):
+        return None
+    row = m1[index + 1]
+    try:
+        epoch = int(row["epoch"])
+        price = float(row["open"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if epoch != int(expected_epoch) or not math.isfinite(price) or price <= 0:
+        return None
+    return price
+
+
 def _monetary(distance,lots):
     return abs(distance)*USD_PER_PRICE_UNIT_AT_010*(lots/0.10)
 
@@ -67,9 +82,10 @@ def replay(frames,cost=None):
         sig=detect(hist)
         if not sig.get("confirmed") or sig.get("direction") not in {"LONG","SHORT"}: continue
         # Match live execution: only the immediately following M1 epoch is a valid entry.
-        if int(m1[i+1]["epoch"]) != decision:
+        entry = next_m1_entry(m1, i, decision)
+        if entry is None:
             continue
-        entry=float(m1[i+1]["open"]); side=sig["direction"]
+        side=sig["direction"]
         levels=sig.get("reference_levels") or {}; stop=levels.get("stop_loss")
         if stop is None: continue
         stop=float(stop)
