@@ -20,7 +20,7 @@ import websockets
 from .step_index_quant import analyze_backtest, equity_stats, log_returns, acceptance_gate
 
 WS = os.getenv("DERIV_PUBLIC_WS", "wss://api.derivws.com/trading/v1/options/ws/public")
-GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "D1": 86400, "W1": 604800}
+GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 86400, "W1": 604800}
 MAX_CANDLE_CHUNK = 5000
 
 # Deriv-published classic Step Index mechanics; descriptive metadata only.
@@ -39,7 +39,7 @@ STEP_INDEX_MARKET_MECHANICS = {
     "source": "Deriv Academy — Step Indices evolution",
     "source_url": "https://traders-academy.deriv.com/es/trading-guides/step-indices-evolution-step",
 }
-DEFAULT_COUNTS = {"M1": 5000, "M5": 20000, "M15": 7000, "H1": 2500, "D1": 1000, "W1": 260}
+DEFAULT_COUNTS = {"M1": 5000, "M5": 20000, "M15": 7000, "H1": 2500, "H4": 1500, "D1": 1000, "W1": 260}
 
 
 def ema(values: list[float], period: int) -> float | None:
@@ -355,14 +355,14 @@ def indicator_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
         fib = {str(ratio): hi - span * ratio for ratio in (0.236, 0.382, 0.5, 0.618, 0.786)}
     return {
         "candles": len(rows), "last_closed_epoch": int(rows[-1]["epoch"]) if rows else None,
-        "last_close": c[-1] if c else None, "ema10": e10, "ema20": e20,
+        "last_close": c[-1] if c else None, "ema9": ema(c, 9), "ema10": e10, "ema20": e20, "ema50": ema(c, 50),
         "direction": "LONG" if e10 is not None and e20 is not None and e10 > e20 else
                      "SHORT" if e10 is not None and e20 is not None and e10 < e20 else "UNKNOWN",
         "rsi14": rsi(c), "atr14": atr(rows, 14),
         "macd_line": macd_value, "macd_signal": signal_value,
         "macd_histogram": macd_value - signal_value if macd_value is not None and signal_value is not None else None,
         "bollinger20_lower": bb_low, "bollinger20_middle": bb_mid, "bollinger20_upper": bb_high,
-        "stochastic9_k": stoch_k, "stochastic9_d": stoch_d,
+        "stochastic9_k": stoch_k, "stochastic9_d": stoch_d, "adx14": None, "plus_di14": None, "minus_di14": None,
         "fibonacci_rolling_100": fib,
     }
 
@@ -437,13 +437,129 @@ def _json_safe(obj: Any) -> Any:
     return obj
 
 
-def write_pdf(report: dict[str, Any], path: Path) -> None:
+def _chart_series(rows: list[dict[str, Any]]) -> dict[str, list[float | None]]:
+    """Build display-only EMA, Bollinger, MACD, RSI, ATR and ADX series from closed OHLC."""
+    n = len(rows)
+    close = [float(r["close"]) for r in rows]
+    high = [float(r["high"]) for r in rows]
+    low = [float(r["low"]) for r in rows]
+    def rolling_mean(values: list[float], period: int) -> list[float | None]:
+        return [None if i + 1 < period else sum(values[i + 1-period:i+1]) / period for i in range(n)]
+    def rolling_std(values: list[float], period: int) -> list[float | None]:
+        out: list[float | None] = [None] * n
+        for i in range(period - 1, n):
+            seg = values[i-period+1:i+1]
+            avg = sum(seg) / period
+            out[i] = math.sqrt(sum((v-avg)**2 for v in seg) / period)
+        return out
+    ema9, ema20, ema50 = ema_series(close,9), ema_series(close,20), ema_series(close,50)
+    mid = rolling_mean(close,20); sd = rolling_std(close,20)
+    upper = [None if mid[i] is None or sd[i] is None else mid[i]+2*sd[i] for i in range(n)]
+    lower = [None if mid[i] is None or sd[i] is None else mid[i]-2*sd[i] for i in range(n)]
+    e12,e26 = ema_series(close,12),ema_series(close,26)
+    macd = [None if e12[i] is None or e26[i] is None else e12[i]-e26[i] for i in range(n)]
+    valid_macd = [v for v in macd if v is not None]
+    sig_valid = ema_series(valid_macd,9)
+    signal: list[float | None] = [None]*n
+    j=0
+    for i,v in enumerate(macd):
+        if v is not None:
+            if j < len(sig_valid): signal[i]=sig_valid[j]
+            j+=1
+    hist = [None if macd[i] is None or signal[i] is None else macd[i]-signal[i] for i in range(n)]
+    rsi_values: list[float | None] = [None]*n
+    for i in range(14,n):
+        diffs=[close[k]-close[k-1] for k in range(i-13,i+1)]
+        gain=sum(max(v,0) for v in diffs)/14; loss=sum(max(-v,0) for v in diffs)/14
+        rsi_values[i]=100 if loss==0 and gain>0 else 50 if loss==0 else 100-100/(1+gain/loss)
+    tr=[0.0]*n; plus_dm=[0.0]*n; minus_dm=[0.0]*n
+    for i in range(1,n):
+        tr[i]=max(high[i]-low[i],abs(high[i]-close[i-1]),abs(low[i]-close[i-1]))
+        up=high[i]-high[i-1]; down=low[i-1]-low[i]
+        plus_dm[i]=up if up>down and up>0 else 0.0
+        minus_dm[i]=down if down>up and down>0 else 0.0
+    atr_values: list[float | None]=[None]*n
+    pdi: list[float | None]=[None]*n; mdi: list[float | None]=[None]*n
+    dx: list[float | None]=[None]*n; adx_values: list[float | None]=[None]*n
+    for i in range(14,n):
+        av=sum(tr[i-13:i+1])/14
+        atr_values[i]=av
+        if av>0:
+            pdi[i]=100*sum(plus_dm[i-13:i+1])/14/av
+            mdi[i]=100*sum(minus_dm[i-13:i+1])/14/av
+            denom=(pdi[i] or 0)+(mdi[i] or 0)
+            dx[i]=0 if denom==0 else 100*abs((pdi[i] or 0)-(mdi[i] or 0))/denom
+    for i in range(27,n):
+        vals=[v for v in dx[i-13:i+1] if v is not None]
+        if len(vals)==14: adx_values[i]=sum(vals)/14
+    return {"ema9":ema9,"ema20":ema20,"ema50":ema50,"bb_upper":upper,"bb_mid":mid,"bb_lower":lower,
+            "macd":macd,"macd_signal":signal,"macd_hist":hist,"rsi":rsi_values,
+            "atr":atr_values,"adx":adx_values,"plus_di":pdi,"minus_di":mdi}
+
+
+def generate_mtf_charts(frames: dict[str, list[dict[str, Any]]], outdir: Path) -> dict[str, str]:
+    """Write consistent five-panel MTF PNG charts using closed Deriv OHLC only."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    from matplotlib.patches import Rectangle
+    from datetime import timedelta
+    outdir.mkdir(parents=True, exist_ok=True)
+    paths: dict[str,str] = {}
+    for tf in ("M1","M5","M15","H1","H4"):
+        rows=frames.get(tf,[])
+        if len(rows)<60:
+            continue
+        ind=_chart_series(rows)
+        # Keep the PDF legible while preserving a recent, fixed display window.
+        limit={"M1":240,"M5":240,"M15":200,"H1":180,"H4":160}[tf]
+        start=max(0,len(rows)-limit); view=rows[start:]
+        x=[datetime.fromtimestamp(int(r["epoch"]),tz=timezone.utc) for r in view]
+        ix=list(range(len(view)))
+        fig,axes=plt.subplots(5,1,figsize=(13.0,10.0),sharex=True,
+                              gridspec_kw={"height_ratios":[4.2,1.25,1.15,1.0,1.25]})
+        fig.suptitle(f"SQAO · STEP INDEX · {tf} · Deriv OHLC cerrado · última vela {x[-1].strftime('%Y-%m-%d %H:%M UTC')}",
+                     fontsize=13,fontweight="bold")
+        ax=axes[0]
+        def vals(key): return ind[key][start:]
+        for k in range(len(view)):
+            r=view[k]; o,h,l,c=map(float,(r["open"],r["high"],r["low"],r["close"]))
+            up=c>=o; candle_color="#159D83" if up else "#D9534F"
+            ax.vlines(k,l,h,color=candle_color,linewidth=.75)
+            body=max(abs(c-o),0.012)
+            ax.add_patch(Rectangle((k-.28,min(o,c)),.56,body,facecolor=candle_color,edgecolor=candle_color,linewidth=.5))
+        for key,label,color in [("ema9","EMA 9","#D946EF"),("ema20","EMA 20","#06A6A6"),("ema50","EMA 50","#E0A526")]:
+            ax.plot(ix,vals(key),label=label,linewidth=1.0,color=color)
+        ax.plot(ix,vals("bb_upper"),color="#36A9E1",linewidth=.75,linestyle=":")
+        ax.plot(ix,vals("bb_mid"),color="#36A9E1",linewidth=.55,alpha=.6)
+        ax.plot(ix,vals("bb_lower"),color="#36A9E1",linewidth=.75,linestyle=":",label="Bollinger 20,2")
+        ax.set_ylabel("Precio"); ax.legend(loc="upper left",ncol=4,fontsize=8); ax.grid(alpha=.2)
+        ax=axes[1]; hist=vals("macd_hist")
+        ax.bar(ix,[0 if v is None else v for v in hist],color=["#159D83" if (v or 0)>=0 else "#D9534F" for v in hist],width=.7)
+        ax.plot(ix,vals("macd"),label="MACD",linewidth=.8,color="#168C99")
+        ax.plot(ix,vals("macd_signal"),label="Señal",linewidth=.8,color="#D97706")
+        ax.axhline(0,color="grey",linewidth=.5); ax.set_ylabel("MACD"); ax.legend(loc="upper left",fontsize=7); ax.grid(alpha=.2)
+        ax=axes[2]; ax.plot(ix,vals("rsi"),color="#2563EB",linewidth=.9); ax.axhline(70,color="grey",ls="--",lw=.6); ax.axhline(50,color="grey",ls=":",lw=.5); ax.axhline(30,color="grey",ls="--",lw=.6); ax.set_ylim(0,100); ax.set_ylabel("RSI 14"); ax.grid(alpha=.2)
+        ax=axes[3]; ax.plot(ix,vals("atr"),color="#0D9488",linewidth=.9); ax.set_ylabel("ATR 14"); ax.grid(alpha=.2)
+        ax=axes[4]; ax.plot(ix,vals("adx"),label="ADX 14",color="#7C3AED",linewidth=.9); ax.plot(ix,vals("plus_di"),label="+DI",color="#159D83",linewidth=.75); ax.plot(ix,vals("minus_di"),label="-DI",color="#D9534F",linewidth=.75); ax.axhline(25,color="grey",ls="--",lw=.6); ax.set_ylabel("ADX / DI"); ax.legend(loc="upper left",ncol=3,fontsize=7); ax.grid(alpha=.2)
+        step=max(1,len(ix)//8); ticks=ix[::step]
+        axes[-1].set_xticks(ticks); axes[-1].set_xticklabels([x[i].strftime("%d %b\n%H:%M") for i in ticks],fontsize=7)
+        axes[-1].set_xlabel("Tiempo (UTC)")
+        fig.tight_layout(rect=[0,0,1,.97])
+        path=outdir/f"step_index_chart_{tf.lower()}.png"
+        fig.savefig(path,dpi=145,bbox_inches="tight"); plt.close(fig)
+        paths[tf]=str(path)
+    return paths
+
+
+def write_pdf(report: dict[str, Any], path: Path, chart_paths: dict[str, str] | None = None) -> None:
     """Render executive PDF. ReportLab is installed by the research workflow."""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image as PDFImage
     from reportlab.graphics.shapes import Drawing, String, Line, PolyLine
 
     styles = getSampleStyleSheet()
@@ -552,7 +668,14 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
             [tf] + [num(x["fibonacci_rolling_100"].get(str(k)),2) for k in (0.236,0.382,0.5,0.618,0.786)]
             for tf,x in report["indicators"].items()
         ], [1.5*cm,2.5*cm,2.5*cm,2.5*cm,2.5*cm,2.5*cm]),
-        p("3. Escenario de scalping actual (condicional; no es una orden)", "SQH1"),
+        p("3. Gráficos técnicos MTF — estándar oficial SQAO", "SQH1"),
+        p("Cada gráfico presenta velas OHLC cerradas, EMA 9/20/50, Bollinger(20,2), MACD(12,26,9), RSI(14), ATR(14) y ADX/+DI/-DI(14). Los indicadores son descriptivos y no constituyen confirmaciones estadísticamente independientes.", "SQBody"),
+        *([PageBreak()] + [item for tf in ("M1","M5","M15","H1","H4")
+          for item in ([p(f"Gráfico {tf} — fuente Deriv OHLC cerrada", "SQH2"),
+                        PDFImage(chart_paths[tf], width=18.0*cm, height=13.85*cm), PageBreak()]
+                       if chart_paths and tf in chart_paths else
+                       [p(f"Gráfico {tf}: NO DISPONIBLE — histórico insuficiente o no generado.", "SQAlert")])) ,
+        p("4. Escenario de scalping actual (condicional; no es una orden)", "SQH1"),
         table([
             ["Estado","Dirección","Precio de referencia","Stop orientativo","Objetivo orientativo","R:R"],
             [setup_state, setup.get("direction","n/d"),
@@ -560,11 +683,11 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
              num(setup.get("target_reference"),2), num(setup.get("target_R"),2)]
         ], [3.0*cm,2.0*cm,2.8*cm,2.8*cm,3.0*cm,1.4*cm]),
         p("Los niveles, cuando existen, usan el último cierre M5 disponible. Verifique cotización vigente, especificación del contrato y coste real antes de actuar. La operación queda bloqueada si la validación histórica no pasa todos los criterios.", "SQBody"),
-        p("4. Metodología y prevención de sesgo", "SQH1"),
+        p("5. Metodología y prevención de sesgo", "SQH1"),
         p(report["backtest"]["rule"], "SQBody"),
         p("La señal se determina al cierre de M5. EMA10/20 de M15 y H1 solo usan velas ya cerradas a la hora de decisión. La entrada de simulación se realiza en la apertura de la siguiente vela M5. Si stop y objetivo aparecen tocados en la misma vela, se contabiliza primero el stop. Las últimas velas incompletas quedan excluidas.", "SQBody"),
         p("Cálculos: retorno logarítmico = ln(C[t] / C[t-1]); expectativa = media de R por operación; profit factor = suma de R positivos / valor absoluto de la suma de R negativos; drawdown = máxima caída desde un máximo previo; tasa de acierto con intervalo Wilson bilateral del 95%.", "SQBody"),
-        p("5. Estadística y logaritmos", "SQH1"),
+        p("6. Estadística y logaritmos", "SQH1"),
         table([
             ["Métrica","Valor"],
             ["n retornos logarítmicos M5",report["log_distribution_m5"]["n"]],
@@ -577,19 +700,19 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
             ["Sharpe por operación (sin anualizar)",num(s["sharpe_per_trade_not_annualized"])],
             ["Sortino por operación (sin anualizar)",num(s["sortino_per_trade_not_annualized"])],
         ], [6.0*cm,9.0*cm]),
-        p("6. Curva de capital fuera de muestra", "SQH1"),
+        p("7. Curva de capital fuera de muestra", "SQH1"),
         chart,
-        p("7. Estabilidad por subperiodos cronológicos", "SQH1"),
+        p("8. Estabilidad por subperiodos cronológicos", "SQH1"),
         table([["Bloque OOS","Operaciones",winrate_label, f"{expectancy_label} (R)",pf_label]] + [
             [fold["fold"], fold["stats_net"]["n"], pct(fold["stats_net"]["win_rate"]),
              num(fold["stats_net"]["expectancy_r"]), num(fold["stats_net"]["profit_factor"])]
             for fold in oos.get("subperiods", [])
         ], [2.3*cm,2.8*cm,3.0*cm,3.8*cm,2.8*cm]),
-        p("8. Regla de aceptación", "SQH1"),
+        p("9. Regla de aceptación", "SQH1"),
         p("Se requiere simultáneamente tamaño de muestra suficiente, win rate observado ≥ objetivo, límite inferior de Wilson 95% ≥ objetivo, expectativa neta positiva, profit factor > 1 y costes declarados. La superación habilita revisión adicional; no garantiza rentabilidad futura ni constituye una probabilidad predictiva calibrada.", "SQBody"),
-        p("9. Limitaciones", "SQH1"),
+        p("10. Limitaciones", "SQH1"),
         p("Esta estrategia es un baseline mecánico (ruptura de 20 velas + EMA10/20 + filtros M15/H1), no una optimización del algoritmo de Step Index. El resultado depende del histórico disponible, el régimen de mercado, el coste comunicado y la fidelidad del modelo de ejecución. No hay conexión de órdenes ni ejecución real.", "SQBody"),
-        p("10. Conclusión", "SQH1"),
+        p("11. Conclusión", "SQH1"),
         p(f"Decisión operativa del motor: {report['decision']}. Puerta histórica elegible: {gate['eligible']}. Si no se cumplen todos los filtros o los costes no se han definido, no se emite una operación activa.", "SQAlert"),
     ]
     doc = SimpleDocTemplate(str(path), pagesize=A4, rightMargin=1.4*cm, leftMargin=1.4*cm,
@@ -689,14 +812,16 @@ def main() -> None:
     json_path = outdir / "step_index_quant_report.json"
     pdf_path = outdir / "step_index_quant_report.pdf"
     json_path.write_text(json.dumps(_json_safe(report), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
-    write_pdf(report, pdf_path)
+    chart_paths = generate_mtf_charts(frames, outdir)
+    report["chart_files"] = {tf: Path(path).name for tf, path in chart_paths.items()}
+    write_pdf(report, pdf_path, chart_paths)
     print(json.dumps({
         "symbol": report["symbol"], "decision": report["decision"],
         "oos_n": report["backtest"]["out_of_sample"]["n_trades"],
         "oos_win_rate": report["backtest"]["out_of_sample"]["stats_net"]["win_rate"],
         "oos_expectancy_r": report["backtest"]["out_of_sample"]["stats_net"]["expectancy_r"],
         "profit_factor": report["backtest"]["out_of_sample"]["stats_net"]["profit_factor"],
-        "pdf": str(pdf_path), "json": str(json_path),
+        "pdf": str(pdf_path), "json": str(json_path), "charts": report.get("chart_files", {}),
     }, ensure_ascii=False, indent=2))
 
 
