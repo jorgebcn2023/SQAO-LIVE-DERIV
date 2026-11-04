@@ -126,7 +126,8 @@ def main():
     raw=os.getenv("SQAO_SCALP_ROUND_TRIP_COST_PRICE","").strip(); cost=float(raw) if raw else None
     if cost is not None and (not math.isfinite(cost) or cost<0): raise SystemExit("Invalid round-trip cost")
     sym,frames,diagnostics=asyncio.run(market()); bt=replay(frames,cost)
-    costs_verified=False  # MT5 evidence does not verify commission and slippage.\n    gate=statistical_gate(bt["gross"]["oos"],bt["net"]["oos"],costs_verified=costs_verified)
+    costs_verified=False  # MT5 evidence does not verify commission and slippage.
+    gate=statistical_gate(bt["gross"]["oos"],bt["net"]["oos"],costs_verified=costs_verified)
     result={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"symbol":sym,
         "source":"Deriv public timestamped OHLC; closed candles only","data_counts":{k:len(v) for k,v in frames.items()},
         "data_diagnostics":diagnostics,"read_only":True,"backtest":bt,
