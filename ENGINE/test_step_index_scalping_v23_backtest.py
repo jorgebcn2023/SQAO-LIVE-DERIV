@@ -56,7 +56,7 @@ class BacktestV23Tests(unittest.TestCase):
                     "execution_levels":{"entry":100,"stop_loss":99.4,"take_profit":100.9,
                         "risk_price_units":0.6,"reward_price_units":0.9,"risk_reward":"1:1.5"}}
             }))
-            row=build_table17(str(p),{"n":100},None,"BLOCKED",{"decision":"NO_TRADE"})
+            row=build_table17(str(p),{"n":100},{"n":200},"VERIFIED",{"eligible":True,"decision":"ELIGIBLE"})
             self.assertEqual(row["decision"],"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION")
             self.assertEqual(row["entry_price"],100)
             self.assertAlmostEqual(row["stop_loss"],99.4)
