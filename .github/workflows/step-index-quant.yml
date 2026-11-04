@@ -124,7 +124,7 @@ jobs:
           lab = json.loads(Path('DATA/step_index_strategy_lab.json').read_text(encoding='utf-8'))
           am = json.loads(Path('DATA/step_index_arima_mc.json').read_text(encoding='utf-8'))
           audit = json.loads(Path('DATA/step_index_mt5_cost_audit.json').read_text(encoding='utf-8'))
-          for name in ['step_index_quant_report.pdf','step_index_strategy_lab.pdf','step_index_arima_mc.pdf']:
+          for name in ['step_index_quant_report.pdf','step_index_strategy_lab.pdf','step_index_arima_mc.pdf','step_index_table17.pdf']:
               if not Path('DATA', name).is_file() or Path('DATA', name).stat().st_size < 1000:
                   raise SystemExit(f'Missing/invalid PDF: {name}')
           if data.get('decision') not in {'NO_TRADE', 'CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION'}:
