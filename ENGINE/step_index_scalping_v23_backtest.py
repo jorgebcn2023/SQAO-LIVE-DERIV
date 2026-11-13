@@ -235,6 +235,40 @@ def build_table17(live_path, gross_oos, net_oos, cost_status, eligibility):
         "signal_epoch": setup.get("decision_epoch"),
         "entry_epoch": entry_epoch if confirmed else None,
         "holding_limit_m1_bars": MAX_HOLD_M1_BARS,
+        "activation_epoch": entry_epoch if confirmed else None,
+        "activation_utc": datetime.fromtimestamp(entry_epoch, timezone.utc).isoformat() if confirmed else None,
+        "entry_valid_until_epoch": (entry_epoch + 60) if confirmed else None,
+        "entry_valid_until_utc": datetime.fromtimestamp(entry_epoch + 60, timezone.utc).isoformat() if confirmed else None,
+        "trade_expiry_epoch": (entry_epoch + MAX_HOLD_M1_BARS * 60) if confirmed else None,
+        "trade_expiry_utc": datetime.fromtimestamp(entry_epoch + MAX_HOLD_M1_BARS * 60, timezone.utc).isoformat() if confirmed else None,
+        "timeframe_confirmations": {
+            tf: {
+                "trend_ema10_20": (
+                    "LONG" if len((live.get("last_closed") or {}).get(tf, [])) >= 20 and
+                    ema([float(x["close"]) for x in live["last_closed"][tf]], 10) >
+                    ema([float(x["close"]) for x in live["last_closed"][tf]], 20)
+                    else "SHORT" if len((live.get("last_closed") or {}).get(tf, [])) >= 20 and
+                    ema([float(x["close"]) for x in live["last_closed"][tf]], 10) <
+                    ema([float(x["close"]) for x in live["last_closed"][tf]], 20)
+                    else "NOT_AVAILABLE"
+                ),
+                "aligned_with_signal": bool(confirmed and (
+                    ("LONG" if len((live.get("last_closed") or {}).get(tf, [])) >= 20 and
+                     ema([float(x["close"]) for x in live["last_closed"][tf]], 10) >
+                     ema([float(x["close"]) for x in live["last_closed"][tf]], 20)
+                     else "SHORT" if len((live.get("last_closed") or {}).get(tf, [])) >= 20 and
+                     ema([float(x["close"]) for x in live["last_closed"][tf]], 10) <
+                     ema([float(x["close"]) for x in live["last_closed"][tf]], 20)
+                     else None) == direction
+                ))
+            } for tf in ("H4", "H1", "M15", "M5", "M1")
+        },
+        "position_size_lots": None,
+        "monetary_risk": None,
+        "position_size_status": "BLOCKED_NO_VERIFIED_CONTRACT_SPEC_OR_ACCOUNT_RISK_BUDGET",
+        "position_size_required_inputs": ["verified Deriv tick value/contract specification", "account equity or balance", "risk percentage per trade"],
+        "cost_breakdown": {"spread": None, "commission": None, "slippage": None, "round_trip_total": None},
+        "cost_breakdown_status": "NOT_VERIFIED_FROM_BROKER",
         "position_size_scenarios": monetary,
         "position_size_note": "No account balance or user risk fraction is configured; lot size is shown only as explicit scenarios, not a personalized size.",
         "monetary_conversion": "USD 0.10 per 0.1 price units at 0.10 lots; user-declared and not broker tick-value verified.",
@@ -276,6 +310,11 @@ def main():
         ("Entrada M1",table17.get("entry_price")),("Stop Loss",table17.get("stop_loss")),
         ("Take Profit",table17.get("take_profit")),("Riesgo (precio)",table17.get("risk_price_units")),
         ("Beneficio objetivo (precio)",table17.get("reward_price_units")),("Relación R:R",table17.get("risk_reward")),
+        ("Activación UTC",table17.get("activation_utc")),("Validez de entrada UTC",table17.get("entry_valid_until_utc")),
+        ("Vencimiento operativo UTC",table17.get("trade_expiry_utc")),
+        ("Confirmaciones H4/H1/M15/M5/M1",json.dumps(table17.get("timeframe_confirmations",{}),ensure_ascii=False)),
+        ("Tamaño de posición calculado",table17.get("position_size_status")),
+        ("Desglose de costes",json.dumps(table17.get("cost_breakdown",{}),ensure_ascii=False)),
         ("Límite de permanencia (M1)",table17.get("holding_limit_m1_bars")),
         ("Escenarios lotaje/USD",json.dumps(table17.get("position_size_scenarios",{}),ensure_ascii=False)),
         ("OOS bruto · operaciones",oos.get("n")),("OOS bruto · acierto",oos.get("win_rate")),
