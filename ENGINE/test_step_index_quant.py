@@ -8,6 +8,25 @@ from ENGINE.step_index_research import (
 )
 
 
+def test_table18_historical_oos_levels_are_numeric_and_directional():
+    from ENGINE.step_index_strategy_lab import historical_oos_levels
+    short_trade = {
+        "sample": "out_of_sample", "signal_epoch": 1_800_000_000,
+        "direction": "SHORT", "entry": 7308.7, "risk_price": 6.0,
+        "exit_reason": "STOP", "net_r": -1.0,
+    }
+    levels = historical_oos_levels(short_trade, 1.5)
+    assert levels is not None
+    assert levels["entry"] == 7308.7
+    assert levels["stop_loss"] == 7314.7
+    assert levels["take_profit"] == 7299.7
+    assert levels["risk_reward"] == "1:1.5"
+    assert levels["sample"] == "out_of_sample"
+    assert levels["is_current_signal"] is False
+    assert historical_oos_levels({**short_trade, "sample": "train"}, 1.5) is None
+    assert historical_oos_levels({**short_trade, "entry": float("nan")}, 1.5) is None
+
+
 def test_log_returns():
     vals = log_returns([100, 110, 99])
     assert len(vals) == 2
