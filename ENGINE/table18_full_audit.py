@@ -2,8 +2,7 @@
 
 Consumes the canonical step_index_quant_report.json. Every price is copied from
 the chronological OHLC backtest ledger; no screenshot-derived or hypothetical
-execution levels are manufactured. Indicator snapshots are explicitly labelled
-as latest report context, not historical-at-entry indicator values.
+execution levels are manufactured. Indicator snapshots are recomputed from closed candles at each historical signal timestamp.
 """
 from __future__ import annotations
 
