@@ -112,3 +112,34 @@ Outputs:
 GitHub Actions workflow `.github/workflows/step-index-quant.yml` runs every six hours, supports manual dispatch, and uploads both outputs as a 30-day artifact. Configure repository Actions variable `SQAO_STEP_ROUND_TRIP_COST_PRICE` with a realistic total round-trip cost in quote-price units. Without that value, cost-adjusted eligibility is intentionally blocked and the result remains `NO_TRADE`.
 
 This baseline does not claim a 70% future hit rate. The statistical gate needs at least 100 OOS trades, observed win rate >=70%, Wilson 95% lower bound >=70%, positive net expectancy, profit factor >1 and declared transaction costs. Passing the gate only makes a candidate eligible for further review; it does not guarantee the next trade and does not by itself authorize execution. No order-placement API is used.
+
+
+## SQAO V2.1 — Screenshot Visual Extraction
+
+The chart-vision layer now calls `ENGINE/chart_visual_extraction.py` for every uploaded image before GPT Vision reconciliation. It records the detected timeframe, OCR text and numeric tokens with image coordinates, visible MACD readouts, right-axis price labels, a best-effort axis calibration, and a possible horizontal quote-line estimate. Values retain their screenshot provenance and are never silently promoted to OHLC or executable quotes.
+
+The complete Table 18 LONG/SHORT numeric schema is emitted by `table18_template()`. Unsupported fields remain JSON `null` (not zero); this preserves all columns without inventing EMA/RSI/ATR/ADX/Stochastic values, entry, SL, TP, OOS metrics, or transaction costs. Screenshot extraction is complementary to, not a replacement for, timestamped closed OHLC, synchronized MTF data, cost verification, and chronological OOS/walk-forward validation.
+
+Optional OCR runtime: Python packages in `ENGINE/requirements.txt` plus the Tesseract OCR system binary. CI installs Tesseract and runs `python -m ENGINE.test_chart_visual_extraction`. If OCR is unavailable, the engine reports the dependency/runtime failure and fails closed. The system remains READ-ONLY / RESEARCH-ONLY; no order endpoints are introduced.
+
+To call from Python:
+
+```python
+from ENGINE.chart_visual_extraction import build_visual_audit
+report = build_visual_audit({
+    "H4": "charts/step_h4.png",
+    "H1": "charts/step_h1.png",
+    "M15": "charts/step_m15.png",
+    "M5": "charts/step_m5.png",
+    "M1": "charts/step_m1.png",
+}, output="DATA/chart_visual_audit.json")
+```
+
+
+## SQAO V2.2 — Research reliability and checkpoints
+
+The Step Index quant workflow has bounded stage timeouts and separate diagnostic checkpoints. The baseline research job timeout is 90 minutes (70 minutes for OHLC research); Table 18 is audited as a separate stage. Baseline JSON/PDF and Table 18 JSON/CSV are uploaded independently even when a later stage fails. The consolidated report artifact is published only after all validations pass.
+
+Checkpoint artifacts preserve completed outputs for inspection and manual recovery. GitHub Actions reruns still restart from the beginning; automatic resume from a previous run's artifacts is not implemented. See `docs/SQAO_V22_RESEARCH_RELIABILITY.md`.
+
+The change does not relax the statistical acceptance gate or safety rules. Missing verified all-in costs or insufficient OOS evidence continue to produce `NO_TRADE`.

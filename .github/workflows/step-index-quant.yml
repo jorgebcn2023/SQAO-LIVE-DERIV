@@ -35,12 +35,12 @@ permissions:
 
 concurrency:
   group: sqao-step-index-quant
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   step-index-quant:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 90
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -78,6 +78,7 @@ jobs:
         run: python -m ENGINE.step_index_scalping_v23_backtest
 
       - name: Run Step Index OHLC research and generate PDF
+        timeout-minutes: 70
         env:
           DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
           SQAO_STEP_CANDLES_M1: '5000'
@@ -95,11 +96,36 @@ jobs:
           SQAO_STEP_TARGET_WIN_RATE: '0.70'
           SQAO_STEP_ROUND_TRIP_COST_PRICE: ${{ vars.SQAO_STEP_ROUND_TRIP_COST_PRICE }}
           SQAO_DATA_DIR: DATA
-        run: |
-          python -m ENGINE.step_index_research
-          python -m ENGINE.table18_full_audit
+        run: python -m ENGINE.step_index_research
+
+      - name: Upload baseline research checkpoint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqao-step-index-baseline-checkpoint-${{ github.run_number }}
+          path: |
+            DATA/step_index_quant_report.json
+            DATA/step_index_quant_report.pdf
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Build and audit complete Table 18
+        timeout-minutes: 10
+        run: python -m ENGINE.table18_full_audit
+
+      - name: Upload Table 18 checkpoint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqao-step-index-table18-checkpoint-${{ github.run_number }}
+          path: |
+            DATA/step_index_table18_complete.json
+            DATA/step_index_table18_complete.csv
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Run alternative Step Index strategy lab
+        timeout-minutes: 30
         env:
           DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
           SQAO_LAB_M5_CANDLES: '20000'
@@ -112,6 +138,7 @@ jobs:
         run: python -m ENGINE.step_index_strategy_lab
 
       - name: Run ARIMA and 10,000-path Monte Carlo
+        timeout-minutes: 30
         env:
           DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
           SQAO_ARIMA_SYMBOL: stpRNG
@@ -146,6 +173,7 @@ jobs:
           PY
 
       - name: Upload reproducible report artifacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: sqao-step-index-arima-mc-${{ github.run_number }}
