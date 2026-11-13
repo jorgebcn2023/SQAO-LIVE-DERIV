@@ -17,7 +17,7 @@ def test_indicator_snapshot_reports_all_standard_indicators():
     for key in ("ema9","ema20","ema50","rsi14","atr14","macd_line","macd_signal",
                 "macd_histogram","bollinger20_lower","bollinger20_middle",
                 "bollinger20_upper","adx14","plus_di14","minus_di14",
-                "stochastic9_k","stochastic9_d"):
+                "stochastic14_k","stochastic3_d"):
         assert snap[key] is not None, key
     assert snap["indicator_parameters"]["EMA"] == [9,20,50]
     assert "NOT_IDENTIFIABLE" in snap["unlabelled_chart_panes"]
@@ -42,3 +42,24 @@ def test_missing_data_is_not_fabricated():
     assert snap["rsi14"] is None
     assert snap["macd_histogram"] is None
     assert snap["ema_stack"] == "MIXED/NA"
+
+
+def test_v2_reports_invalid_rows_and_uses_coverage_adjusted_score():
+    rows = frame(180, 60)
+    rows.append({"epoch": 1700000000 + 181*60, "open": 1, "high": 0, "low": 2, "close": 1})
+    snap = indicator_snapshot(rows)
+    assert snap["version"] == "2.0.0"
+    assert snap["data_quality"]["invalid_rows"] == 1
+    assert snap["data_quality"]["valid_rows"] == 180
+    sparse = build_mtf_audit({"H4": frame(10, 14400), "H1": [], "M15": [], "M5": [], "M1": []})
+    assert sparse["score"]["coverage_pct"] < 60
+    assert sparse["score"]["decision"] == "NO_DIRECTIONAL_EDGE"
+    assert sparse["score"]["max_per_side"] < sparse["score"]["total_possible_weight"]
+
+
+def test_v2_stochastic_slow_k_and_d_are_distinct_series_when_moving():
+    snap = indicator_snapshot(frame(180, 60))
+    assert snap["stochastic14_k"] is not None
+    assert snap["stochastic3_k"] is not None
+    assert snap["stochastic3_d"] is not None
+    assert snap["indicator_parameters"]["RSI_WILDER"] == 14
