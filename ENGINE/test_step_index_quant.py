@@ -1,5 +1,6 @@
 """Regression tests for Step Index quant research functions."""
 import math
+from ENGINE.step_index_strategy_lab import build_table18
 from ENGINE.step_index_quant import (
     acceptance_gate, analyze_backtest, equity_stats, log_compounding, log_returns, wilson_interval,
 )
@@ -91,7 +92,7 @@ def test_backtest_rejects_unvalidated_costs():
 def test_executive_pdf_generation():
     import tempfile
     from pathlib import Path
-    from ENGINE.step_index_research import indicator_snapshot, log_distribution, write_pdf
+    from ENGINE.step_index_research import indicator_snapshot, log_distribution, write_pdf, generate_mtf_charts
     rows = []
     for i in range(120):
         close = 7350.0 + i * 0.15 + 0.3 * math.sin(i / 4)
@@ -115,8 +116,14 @@ def test_executive_pdf_generation():
         },
     }
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "step-index-test.pdf"
-        write_pdf(report, path)
+        out = Path(tmp)
+        frames = {tf: [{**row, "epoch": 1_700_000_000 + i * seconds} for i, row in enumerate(rows)]
+                  for tf, seconds in (("M1",60),("M5",300),("M15",900),("H1",3600),("H4",14400))}
+        charts = generate_mtf_charts(frames, out)
+        assert set(charts) == {"M1","M5","M15","H1","H4"}
+        assert all(Path(p).is_file() and Path(p).stat().st_size > 5000 for p in charts.values())
+        path = out / "step-index-test.pdf"
+        write_pdf(report, path, charts)
         assert path.is_file()
         assert path.stat().st_size > 3000
 
@@ -139,6 +146,36 @@ def test_aggregate_weekly_from_daily_uses_only_completed_weeks():
     assert weekly[0]["low"] == 99
     assert weekly[0]["close"] == 107
 
+def test_table18_selects_best_observed_candidate_without_fabricating_live_prices():
+    report = {
+        "best_observed_candidate": "rsi_reversal",
+        "performance_basis": "GROSS_COSTS_NOT_CONFIGURED",
+        "oos_net_is_gross_proxy": True,
+        "symbol": {"symbol": "stpRNG"},
+        "strategies": [{
+            "strategy": "rsi_reversal",
+            "parameters": {"target_R": 1.5, "stop_ATR": 1.2, "horizon_m5": 5,
+                           "round_trip_cost_price": None},
+            "oos_net": {"n": 274, "wins": 122, "losses": 152, "win_rate": 122/274,
+                        "wilson_95_low": 0.387, "wilson_95_high": 0.504,
+                        "expectancy_r": -0.053, "profit_factor": 0.888,
+                        "max_drawdown_r": 35.8},
+            "gate": {"eligible": False}
+        }]
+    }
+    table = build_table18(report)
+    assert table["table"] == 18
+    assert table["strategy"] == "rsi_reversal"
+    assert table["historical_oos"]["wins"] == 122
+    assert abs(table["historical_oos"]["hit_rate"] - 0.445255) < 1e-5
+    assert table["parameters"]["rsi_period"] == 14
+    assert table["parameters"]["maximum_holding_period_m5_bars"] == 5
+    assert table["live_execution"]["decision"] == "NO_TRADE"
+    assert table["live_execution"]["entry_price"] is None
+    assert "EXPECTATIVA_OOS_NO_POSITIVA" in table["live_execution"]["blockers"]
+
+
+
 
 if __name__ == "__main__":
     test_log_returns()
@@ -153,4 +190,5 @@ if __name__ == "__main__":
     test_backtest_rejects_unvalidated_costs()
     test_executive_pdf_generation()
     test_aggregate_weekly_from_daily_uses_only_completed_weeks()
+    test_table18_selects_best_observed_candidate_without_fabricating_live_prices()
     print("Step Index quant tests: OK")

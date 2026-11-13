@@ -1,5 +1,6 @@
-import unittest
-from ENGINE.step_index_scalping_v23_backtest import stats, wilson, r_multiple, replay, _monetary, statistical_gate, MAX_HOLD_M1_BARS, next_m1_entry
+import unittest, json, tempfile
+from pathlib import Path
+from ENGINE.step_index_scalping_v23_backtest import stats, wilson, r_multiple, replay, _monetary, statistical_gate, MAX_HOLD_M1_BARS, next_m1_entry, build_table17
 
 class BacktestV23Tests(unittest.TestCase):
     def test_wilson_bounds(self):
@@ -32,6 +33,98 @@ class BacktestV23Tests(unittest.TestCase):
         good={"n":250,"win_rate":.80,"wilson95":[.74,.85],"expectancy_r":.2,"profit_factor":1.5}
         self.assertFalse(statistical_gate(good,good,costs_verified=False)["eligible"])
         self.assertFalse(statistical_gate(good,None,costs_verified=True)["eligible"])
+
+    def test_table17_no_trade_never_fabricates_levels(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/"live.json"
+            p.write_text(json.dumps({"setup":{"confirmed":False,"state":"BIAS_ONLY_WAIT_PULLBACK"}}))
+            row=build_table17(str(p),{"n":100},None,"BLOCKED",{"decision":"NO_TRADE"})
+            self.assertEqual(row["decision"],"NO_TRADE")
+            self.assertIsNone(row["entry_price"])
+            self.assertIsNone(row["stop_loss"])
+            self.assertEqual(row["position_size_scenarios"],{})
+            self.assertIsNone(row["activation_epoch"])
+            self.assertIsNone(row["entry_valid_until_epoch"])
+            self.assertIsNone(row["trade_expiry_epoch"])
+            self.assertIsNone(row["position_size_lots"])
+
+    def test_table17_operational_levels_only_with_exact_confirmed_open(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/"live.json"
+            p.write_text(json.dumps({
+                "symbol":{"symbol":"stpRNG"},
+                "next_m1_open":{"epoch":120},
+                "setup":{"confirmed":True,"execution_price_confirmed":True,
+                    "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION","direction":"LONG",
+                    "decision_epoch":120,"atr14_m1":0.5,
+                    "timeframe_confirmations":{"H4":{"aligned":True},"H1":{"aligned":True},"M15":{"aligned":True},"M5":{"aligned":True},"M1":{"aligned":True}},
+                    "execution_levels":{"entry":100,"stop_loss":99.4,"take_profit":100.9,
+                        "risk_price_units":0.6,"reward_price_units":0.9,"risk_reward":"1:1.5"}}
+            }))
+            row=build_table17(str(p),{"n":100},{"n":200},"VERIFIED",{"eligible":True,"decision":"ELIGIBLE"})
+            self.assertEqual(row["decision"],"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION")
+            self.assertEqual(row["entry_price"],100)
+            self.assertAlmostEqual(row["stop_loss"],99.4)
+            self.assertAlmostEqual(row["take_profit"],100.9)
+            self.assertIn("0.10",row["position_size_scenarios"])
+            self.assertFalse(row["commission_verified"])
+            self.assertFalse(row["slippage_verified"])
+            self.assertEqual(set(row["timeframe_confirmations"]), {"H4","H1","M15","M5","M1"})
+            self.assertEqual(row["activation_epoch"],120)
+            self.assertEqual(row["entry_valid_until_epoch"],180)
+            self.assertEqual(row["trade_expiry_epoch"],1320)
+            self.assertIsNone(row["position_size_lots"])
+            self.assertIsNone(row["monetary_risk"])
+            self.assertEqual(row["position_size_status"],"BLOCKED_NO_VERIFIED_CONTRACT_SPEC_OR_ACCOUNT_RISK_BUDGET")
+            self.assertIsNone(row["cost_breakdown"]["commission"])
+            self.assertEqual(row["cost_breakdown_status"],"NOT_VERIFIED_FROM_BROKER")
+
+    def test_table17_rejects_wrong_next_m1_epoch(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/"live.json"
+            p.write_text(json.dumps({
+                "symbol":{"symbol":"stpRNG"},"next_m1_open":{"epoch":180},
+                "setup":{"confirmed":True,"execution_price_confirmed":True,
+                    "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION","direction":"LONG",
+                    "decision_epoch":120,
+                    "execution_levels":{"entry":100,"stop_loss":99.4,"take_profit":100.9,
+                        "risk_price_units":0.6,"reward_price_units":0.9,"risk_reward":"1:1.5"}}
+            }))
+            row=build_table17(str(p),{"n":200},{"n":200},"VERIFIED",{"eligible":True})
+            self.assertEqual(row["decision"],"NO_TRADE")
+            self.assertIsNone(row["entry_price"])
+            self.assertEqual(row["no_trade_reason"],"LIVE_TRIGGER_LEVELS_OR_EXACT_NEXT_M1_EPOCH_INVALID")
+
+    def test_table17_rejects_inconsistent_risk_geometry(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/"live.json"
+            p.write_text(json.dumps({
+                "symbol":{"symbol":"stpRNG"},"next_m1_open":{"epoch":120},
+                "setup":{"confirmed":True,"execution_price_confirmed":True,
+                    "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION","direction":"LONG",
+                    "decision_epoch":120,
+                    "execution_levels":{"entry":100,"stop_loss":99.0,"take_profit":100.9,
+                        "risk_price_units":0.6,"reward_price_units":0.9,"risk_reward":"1:1.5"}}
+            }))
+            row=build_table17(str(p),{"n":200},{"n":200},"VERIFIED",{"eligible":True})
+            self.assertEqual(row["decision"],"NO_TRADE")
+            self.assertIsNone(row["stop_loss"])
+
+    def test_table17_never_bypasses_missing_cost_eligibility(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/"live.json"
+            p.write_text(json.dumps({
+                "symbol":{"symbol":"stpRNG"},"next_m1_open":{"epoch":120},
+                "setup":{"confirmed":True,"execution_price_confirmed":True,
+                    "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION","direction":"LONG",
+                    "decision_epoch":120,
+                    "execution_levels":{"entry":100,"stop_loss":99.4,"take_profit":100.9,
+                        "risk_price_units":0.6,"reward_price_units":0.9,"risk_reward":"1:1.5"}}
+            }))
+            row=build_table17(str(p),{"n":200},None,"BLOCKED",{"eligible":False,"decision":"NO_TRADE"})
+            self.assertEqual(row["decision"],"NO_TRADE")
+            self.assertIsNone(row["entry_price"])
+            self.assertEqual(row["no_trade_reason"],"STATISTICAL_ELIGIBILITY_BLOCKED")
 
     def test_max_holding_bars_is_20(self):
         self.assertEqual(MAX_HOLD_M1_BARS,20)
