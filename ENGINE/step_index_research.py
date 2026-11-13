@@ -20,7 +20,7 @@ import websockets
 from .step_index_quant import analyze_backtest, equity_stats, log_returns, acceptance_gate
 
 WS = os.getenv("DERIV_PUBLIC_WS", "wss://api.derivws.com/trading/v1/options/ws/public")
-GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "D1": 86400, "W1": 604800}
+GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 86400, "W1": 604800}
 MAX_CANDLE_CHUNK = 5000
 
 # Deriv-published classic Step Index mechanics; descriptive metadata only.

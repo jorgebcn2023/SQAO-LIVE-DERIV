@@ -20,6 +20,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from .step_index_quant import acceptance_gate, equity_stats
+from .chart_indicator_audit import build_mtf_audit
 from .step_index_research import (
     GRANULARITY, atr_series, closed_candles, discover_step_index, ema_series,
     fetch_candles, rsi, _trend_cache, _cached_trend_at, STEP_INDEX_MARKET_MECHANICS,
@@ -36,6 +37,35 @@ def _rsi_series(closes: list[float], period: int = 14) -> list[float | None]:
 def _direction_at(cache: tuple[list[int], list[float | None], list[float | None]], epoch: int) -> str | None:
     """Return trend using completed candles only; cached close epochs respect each timeframe."""
     return _cached_trend_at(cache, epoch)
+
+
+def historical_oos_levels(trade: dict[str, Any], target_r: float) -> dict[str, Any] | None:
+    """Build auditable historical entry/SL/TP from one recorded OOS trade."""
+    try:
+        entry = float(trade["entry"])
+        risk = float(trade["risk_price"])
+        rr = float(target_r)
+        direction = str(trade["direction"]).upper()
+        epoch = int(trade["signal_epoch"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if (direction not in {"LONG", "SHORT"} or not all(math.isfinite(x) for x in (entry, risk, rr))
+            or entry <= 0 or risk <= 0 or rr <= 0 or epoch <= 0
+            or trade.get("sample") != "out_of_sample"):
+        return None
+    sign = 1.0 if direction == "LONG" else -1.0
+    return {
+        "direction": direction, "entry": entry,
+        "stop_loss": entry - sign * risk,
+        "take_profit": entry + sign * risk * rr,
+        "risk_price_units": risk, "reward_price_units": risk * rr,
+        "risk_reward": f"1:{rr:g}", "signal_epoch": epoch,
+        "signal_time_utc": datetime.fromtimestamp(epoch, timezone.utc).isoformat(),
+        "entry_source": "Deriv M5 next-candle open recorded by chronological OOS backtest",
+        "stop_target_source": "ATR(14) risk distance recorded by backtest; target_R strategy parameter",
+        "exit_reason": trade.get("exit_reason"), "realized_R": trade.get("net_r"),
+        "sample": "out_of_sample", "is_current_signal": False,
+    }
 
 
 def _signal(name: str, i: int, rows: list[dict[str, Any]],
@@ -229,7 +259,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     story.extend([table, Spacer(1, 12)])
     best_name = report.get("best_observed_candidate")
     best = next((x for x in report["strategies"] if x["strategy"] == best_name), None)
-    story.append(Paragraph("RANKING OOS POR EFECTIVIDAD OBSERVADA (SE MUESTRAN TODAS LAS CANDIDATAS, INCLUSO <70%)", styles["Heading2"]))
+    story.append(Paragraph("TABLA 18 — RANKING HISTÓRICO OOS POR EFECTIVIDAD OBSERVADA (INCLUYE CANDIDATAS INFERIORES AL 70%)", styles["Heading2"]))
     if best is None:
         story.append(Paragraph("No hay una candidata evaluable con los datos disponibles.", styles["BodyText"]))
     else:
@@ -288,6 +318,12 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                              ("GRID",(0,0),(-1,-1),0.5,colors.grey),
                              ("FONTSIZE",(0,0),(-1,-1),7),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
     story.extend([t17, Spacer(1, 5)])
+    t17_score = report.get("chart_indicator_audit", {}).get("score", {})
+    story.append(Paragraph(
+        "Confluencia técnica agrupada (descriptiva, no probabilidad): LONG " +
+        f"{t17_score.get('long','N/D')}/{t17_score.get('max_per_side','N/D')} ({t17_score.get('long_pct',0):.1f}%) · " +
+        "SHORT " + f"{t17_score.get('short','N/D')}/{t17_score.get('max_per_side','N/D')} ({t17_score.get('short_pct',0):.1f}%) · " +
+        str(t17_score.get("decision", "N/D")), styles["BodyText"]))
     money = table17.get("provisional_monetary_scenarios", {})
     risk_usd, reward_usd = money.get("risk_usd", {}), money.get("reward_usd", {})
     money_rows = [["Volumen", "Riesgo teórico USD", "Beneficio teórico USD"],
@@ -309,14 +345,111 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         Paragraph("El ranking ordena por efectividad OOS observada; expectativa, PF e intervalo de confianza permiten contextualizarla. La efectividad es una frecuencia histórica de la muestra, no una garantía ni la probabilidad de la próxima operación. Si no supera los filtros o faltan costes reales, la decisión sigue siendo NO_TRADE.",
                   styles["BodyText"]),
         Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.", styles["Heading3"])])
+    table18 = report.get("table_18", {})
+    # Safe numeric display for conditional levels; blocked scenarios stay unpublished.
+    fmt_price = lambda x: "NOT PUBLISHED — NO_TRADE" if x is None else f"{float(x):.2f}"
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("TABLA 18 — FICHA DE LA MEJOR CANDIDATA HISTÓRICA", styles["Heading2"]))
+    t18_rows = [
+        ["Campo", "Resultado"],
+        ["Estrategia", str(table18.get("strategy", "N/D"))],
+        ["Temporalidad / filtros", str(table18.get("timeframe", "M5 + filtros M15/H1"))],
+        ["Periodo OOS", str(table18.get("oos_period_utc", "N/D"))],
+        ["Operaciones OOS", str(table18.get("oos_trades", "N/D"))],
+        ["Ganadoras / perdedoras", f'{table18.get("wins", "N/D")} / {table18.get("losses", "N/D")}'],
+        ["Efectividad observada", pct(table18.get("win_rate"))],
+        ["IC Wilson 95%", f'{pct(table18.get("wilson_95_low"))}–{pct(table18.get("wilson_95_high"))}'],
+        ["Expectativa", num(table18.get("expectancy_r")) + " R/trade"],
+        ["Profit Factor", num(table18.get("profit_factor"))],
+        ["Drawdown máximo", num(table18.get("max_drawdown_r")) + " R"],
+        ["Base de métricas", str(table18.get("performance_basis", "N/D"))],
+        ["Puerta estadística 70%", str(table18.get("eligibility", "N/D"))],
+        ["Dictamen", str(table18.get("status", "N/D"))],
+        ["Escenario actual", str((table18.get("scenario") or {}).get("status", "NOT_PUBLISHED_NO_TRADE"))],
+        ["Dirección escenario", str((table18.get("scenario") or {}).get("direction") or "NOT PUBLISHED — NO_TRADE")],
+        ["Apertura escenario", fmt_price((table18.get("scenario") or {}).get("entry"))],
+        ["Stop Loss escenario", fmt_price((table18.get("scenario") or {}).get("stop_loss"))],
+        ["Take Profit escenario", fmt_price((table18.get("scenario") or {}).get("take_profit"))],
+        ["Riesgo / objetivo", (num((table18.get("scenario") or {}).get("risk_price_units")) + " / " +
+                               num((table18.get("scenario") or {}).get("reward_price_units")) + " puntos")],
+        ["Risk/Reward", str((table18.get("scenario") or {}).get("risk_reward") or "N/D")],
+        ["Fuente de precios", str((table18.get("scenario") or {}).get("source", "N/D"))],
+        ["Ejemplo OOS histórico (no señal actual)", "—"],
+        ["Dirección histórica", str((table18.get("historical_example_oos_trade") or {}).get("direction", "N/D"))],
+        ["Apertura histórica", fmt_price((table18.get("historical_example_oos_trade") or {}).get("entry"))],
+        ["Stop Loss histórico", fmt_price((table18.get("historical_example_oos_trade") or {}).get("stop_loss"))],
+        ["Take Profit histórico", fmt_price((table18.get("historical_example_oos_trade") or {}).get("take_profit"))],
+        ["Fecha/hora de señal histórica UTC", str((table18.get("historical_example_oos_trade") or {}).get("signal_time_utc", "N/D"))],
+        ["Origen entrada / SL / TP", str((table18.get("historical_example_oos_trade") or {}).get("entry_source", "N/D")) + " / " + str((table18.get("historical_example_oos_trade") or {}).get("stop_target_source", "N/D"))],
+    ]
+    audit = report.get("chart_indicator_audit", {})
+    score = audit.get("score", {})
+    t18_rows.extend([
+        ["Confluencia MTF LONG (puntos / máximo)", f"{score.get('long', 'N/D')} / {score.get('max_per_side', 'N/D')} ({score.get('long_pct', 0):.1f}%)"],
+        ["Confluencia MTF SHORT (puntos / máximo)", f"{score.get('short', 'N/D')} / {score.get('max_per_side', 'N/D')} ({score.get('short_pct', 0):.1f}%)"],
+        ["Sesgo de confluencia (no probabilidad)", str(score.get("decision", "N/D"))],
+        ["Método de puntuación", str(score.get("method", "N/D"))],
+    ])
+    for tf in ("H4", "H1", "M15", "M5", "M1"):
+        x = audit.get("timeframes", {}).get(tf, {})
+        t18_rows.append([f"Indicadores {tf}", "EMA9/20/50="+str(x.get("ema_stack","N/D"))+
+            "; RSI14="+str(x.get("rsi14","N/D"))+"; ATR14="+str(x.get("atr14","N/D"))+
+            "; MACD hist="+str(x.get("macd_histogram","N/D"))+
+            "; BB %B="+str(x.get("bollinger20_percent_b","N/D"))+
+            "; ADX/+DI/-DI="+str(x.get("adx14","N/D"))+"/"+str(x.get("plus_di14","N/D"))+"/"+str(x.get("minus_di14","N/D"))+
+            "; Stoch K/D="+str(x.get("stochastic3_k","N/D"))+"/"+str(x.get("stochastic3_d","N/D"))])
+    t18 = Table(t18_rows, colWidths=[6*cm, 19*cm], repeatRows=1)
+    t18.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+                             ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                             ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                             ("FONTSIZE",(0,0),(-1,-1),8),
+                             ("VALIGN",(0,0),(-1,-1),"TOP")]))
+    story.append(t18)
+    story.append(Paragraph("La efectividad es una frecuencia histórica OOS y no representa la probabilidad de la próxima operación. Si no se configuraron costes round-trip, los resultados son brutos y no pueden presentarse como netos.", styles["BodyText"]))
+    audit = report.get("chart_indicator_audit", {})
+    score = audit.get("score", {})
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("AUDITORÍA INTEGRAL DE INDICADORES MTF — V2.0.0 — M1/M5/M15/H1/H4", styles["Heading2"]))
+    story.append(Paragraph("Calidad de datos: " + " · ".join(
+        tf + ": " + str(audit.get("timeframes", {}).get(tf, {}).get("data_quality", {}).get("valid_rows", 0)) +
+        " velas válidas / " + str(audit.get("timeframes", {}).get(tf, {}).get("data_quality", {}).get("invalid_rows", 0)) +
+        " inválidas / " + str(audit.get("timeframes", {}).get(tf, {}).get("data_quality", {}).get("duplicate_epochs", 0)) +
+        " duplicadas" for tf in ("H4", "H1", "M15", "M5", "M1")), styles["BodyText"]))
+    story.append(Paragraph("Cobertura de indicadores: " + f"{score.get('coverage_pct', 0):.1f}%" +
+        " · Margen direccional: " + f"{score.get('directional_margin_pct', 0):.1f}%" +
+        " · Umbral cobertura: " + f"{score.get('min_coverage_pct', 0):.1f}%" +
+        " · Umbral margen: " + f"{score.get('min_directional_margin_pct', 0):.1f}%", styles["BodyText"]))
+    story.append(Paragraph("Votos agrupados sin doble contabilización: tendencia EMA 9/20/50; momentum MACD(12,26,9); osciladores RSI(14)+Stochastic(9,3,3) en una sola familia; fuerza ADX(14)+DI. Bollinger(20,2) y ATR(14) son diagnósticos, no votos direccionales. Los paneles sin etiqueta se declaran no identificables.", styles["BodyText"]))
+    story.append(Paragraph(f"Confluencia descriptiva: LONG {score.get('long','N/D')}/{score.get('max_per_side','N/D')} ({score.get('long_pct',0):.1f}%) · SHORT {score.get('short','N/D')}/{score.get('max_per_side','N/D')} ({score.get('short_pct',0):.1f}%) · {score.get('decision','N/D')}", styles["BodyText"]))
+    audit_rows = [["TF","Cierre","EMA9","EMA20","EMA50","RSI14","ATR14","MACD hist","BB %B","ADX14","+DI","-DI","Stoch K/D","Voto L/S"]]
+    for tf in ("H4", "H1", "M15", "M5", "M1"):
+        x = audit.get("timeframes", {}).get(tf, {})
+        v = x.get("group_votes", {})
+        n = lambda z: "N/D" if z is None else f"{float(z):.3f}"
+        audit_rows.append([tf,n(x.get("last_close")),n(x.get("ema9")),n(x.get("ema20")),n(x.get("ema50")),
+            n(x.get("rsi14")),n(x.get("atr14")),n(x.get("macd_histogram")),n(x.get("bollinger20_percent_b")),
+            n(x.get("adx14")),n(x.get("plus_di14")),n(x.get("minus_di14")),
+            n(x.get("stochastic3_k"))+"/"+n(x.get("stochastic3_d")),
+            str(sum(1 for z in v.values() if z == "LONG"))+"/"+str(sum(1 for z in v.values() if z == "SHORT"))])
+    audit_table = Table(audit_rows, repeatRows=1)
+    audit_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.35,colors.grey),
+        ("FONTSIZE",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    story.append(audit_table)
+    story.append(Paragraph("Puntuación por familias (orden: tendencia / MACD / RSI+Stochastic / ADX+DI): " + " · ".join(
+        tf+": "+"/".join(str(audit.get("confluence",{}).get(tf,{}).get(k,"N/D")) for k in ("long_groups","short_groups"))
+        for tf in ("H4","H1","M15","M5","M1")), styles["BodyText"]))
+    story.append(Paragraph("Los indicadores no visibles o sin nombre en las capturas no se adivinan ni se puntúan. La puntuación de confluencia no es una probabilidad calibrada ni una estadística OOS.", styles["BodyText"]))
     doc.build(story)
 
 
 async def run() -> dict[str, Any]:
     symbol = await discover_step_index()
-    counts = {"M5": int(os.getenv("SQAO_LAB_M5_CANDLES", "20000")),
+    counts = {"M1": int(os.getenv("SQAO_LAB_M1_CANDLES", "30000")),
+              "M5": int(os.getenv("SQAO_LAB_M5_CANDLES", "20000")),
               "M15": int(os.getenv("SQAO_LAB_M15_CANDLES", "7000")),
-              "H1": int(os.getenv("SQAO_LAB_H1_CANDLES", "2500"))}
+              "H1": int(os.getenv("SQAO_LAB_H1_CANDLES", "2500")),
+              "H4": int(os.getenv("SQAO_LAB_H4_CANDLES", "1000"))}
     frames = {}
     for tf, count in counts.items():
         rows = await fetch_candles(symbol["symbol"], tf, count)
@@ -327,7 +460,16 @@ async def run() -> dict[str, Any]:
     cost = float(raw_cost) if raw_cost else None
     if cost is not None and (not math.isfinite(cost) or cost < 0):
         raise ValueError("SQAO_STEP_ROUND_TRIP_COST_PRICE must be non-negative")
-    return build_report(frames, symbol, cost)
+    report = build_report(frames, symbol, cost)
+    report["chart_indicator_audit"] = build_mtf_audit(frames)
+    report["chart_indicator_audit"]["integration"] = {
+        "component": "SQAO Chart Indicator Audit",
+        "version": "2.0.0",
+        "input_policy": "closed OHLC only",
+        "execution_mode": "READ_ONLY",
+        "timeframes": ["H4", "H1", "M15", "M5", "M1"]
+    }
+    return report
 
 
 def main() -> None:
@@ -390,7 +532,83 @@ def main() -> None:
         "statistics_status": "N/A — no OOS backtest for this exact detector rule and parameter set",
         "separate_best_observed_candidate": report.get("best_observed_candidate"),
         "separate_best_observed_metrics": metrics,
-        "price_source": "Deriv current M1 candle open with exact epoch match" if setup.get("execution_price_confirmed") else "No verified next-M1 open; no executable prices"
+        "price_source": "Deriv current M1 candle open with exact epoch match" if setup.get("execution_price_confirmed") else "No verified next-M1 open; no executable prices",
+        "indicator_confluence": report.get("chart_indicator_audit", {}).get("score"),
+        "indicator_timeframes": report.get("chart_indicator_audit", {}).get("timeframes")
+    }
+    # Table 18 is the strongest historical OOS candidate, separate from live-detector Table 17.
+    # Dates are derived only from the actual OOS trades returned by the fixed-rule replay.
+    oos_trades = [t for t in (best.get("trades", []) if best else [])
+                  if t.get("sample") == "out_of_sample"]
+    first_epoch = min((int(t["signal_epoch"]) for t in oos_trades), default=None)
+    last_epoch = max((int(t["signal_epoch"]) for t in oos_trades), default=None)
+    period = "N/D"
+    if first_epoch is not None and last_epoch is not None:
+        period = (datetime.fromtimestamp(first_epoch, timezone.utc).isoformat() +
+                  " — " + datetime.fromtimestamp(last_epoch, timezone.utc).isoformat())
+    best_stats = best.get("oos_net", {}) if best else {}
+    best_params = best.get("parameters", {}) if best else {}
+    # A representative historical OOS trade supplies real numeric entry/SL/TP.
+    # Entry is the next M5 candle open recorded by the backtest; SL/TP are
+    # reconstructed from its recorded ATR risk distance and fixed target_R.
+    # This is explicitly historical evidence, never a current live signal.
+    historical_trade = max(oos_trades, key=lambda t: int(t.get("signal_epoch", 0)), default=None)
+    historical_example = historical_oos_levels(historical_trade, float(best_params.get("target_R", 1.5))) if historical_trade else None
+    report["table_18"] = {
+        "purpose": "Best observed historical strategy from the predeclared Strategy Lab candidates; independent of live detector Table 17",
+        "ranking_basis": "OOS observed win rate descending; expectancy and profit factor as tie-breakers",
+        "strategy": best.get("strategy") if best else None,
+        "rank": best.get("rank_by_oos_win_rate") if best else None,
+        "timeframe": "M5 + closed-candle M15/H1 filters",
+        "parameters": best_params,
+        "oos_period_utc": period,
+        "oos_start_epoch": first_epoch,
+        "oos_end_epoch": last_epoch,
+        "oos_trades": best_stats.get("n"),
+        "wins": best_stats.get("wins"),
+        "losses": best_stats.get("losses"),
+        "win_rate": best_stats.get("win_rate"),
+        "wilson_95_low": best_stats.get("wilson_95_low"),
+        "wilson_95_high": best_stats.get("wilson_95_high"),
+        "expectancy_r": best_stats.get("expectancy_r"),
+        "profit_factor": best_stats.get("profit_factor"),
+        "max_drawdown_r": best_stats.get("max_drawdown_r"),
+        "performance_basis": report.get("performance_basis"),
+        "eligibility": "PASS" if best and best.get("gate", {}).get("eligible") else "FAIL — 70% gate not met or costs not verified",
+        "status": "CANDIDATA HISTÓRICA PARA REVISIÓN" if best else "SIN CANDIDATA EVALUABLE",
+        "historical_example_oos_trade": historical_example,
+        "not_a_live_signal": True,
+        # Prices are sourced only from the exact-epoch Deriv M1 open in the v23
+        # detector. Screenshots are never treated as an exact OHLC price source.
+        # Publish levels only if both the OOS candidate and current trigger pass.
+        "scenario": {
+            "direction": setup.get("direction") if best and best.get("gate", {}).get("eligible")
+                         and setup.get("execution_price_confirmed") else None,
+            "entry": setup.get("entry_price") if best and best.get("gate", {}).get("eligible")
+                     and setup.get("execution_price_confirmed") else None,
+            "stop_loss": setup.get("stop_loss") if best and best.get("gate", {}).get("eligible")
+                         and setup.get("execution_price_confirmed") else None,
+            "take_profit": setup.get("take_profit") if best and best.get("gate", {}).get("eligible")
+                           and setup.get("execution_price_confirmed") else None,
+            "risk_price_units": (setup.get("execution_levels") or {}).get("risk_price_units")
+                                if best and best.get("gate", {}).get("eligible")
+                                and setup.get("execution_price_confirmed") else None,
+            "reward_price_units": (setup.get("execution_levels") or {}).get("reward_price_units")
+                                  if best and best.get("gate", {}).get("eligible")
+                                  and setup.get("execution_price_confirmed") else None,
+            "risk_reward": (setup.get("execution_levels") or {}).get("risk_reward")
+                           if best and best.get("gate", {}).get("eligible")
+                           and setup.get("execution_price_confirmed") else None,
+            "source": "Deriv closed M1 trigger + exact next-M1 candle open; ATR14 M1",
+            "trigger_epoch": setup.get("decision_epoch"),
+            "entry_epoch": setup.get("decision_epoch") if setup.get("execution_price_confirmed") else None,
+            "status": "CONDITIONAL_SCENARIO_ONLY" if best and best.get("gate", {}).get("eligible")
+                      and setup.get("execution_price_confirmed") else "NOT_PUBLISHED_NO_TRADE",
+            "visual_screenshots_used_as_price_source": False
+        },
+        "indicator_confluence": report.get("chart_indicator_audit", {}).get("score"),
+        "indicator_timeframes": report.get("chart_indicator_audit", {}).get("timeframes"),
+        "indicator_audit_note": "Unlabelled screenshot panes are NOT_IDENTIFIABLE and excluded; indicator values in this report are calculated from closed OHLC, not read from screenshot pixels."
     }
     out.mkdir(parents=True, exist_ok=True)
     json_path, pdf_path = out / "step_index_strategy_lab.json", out / "step_index_strategy_lab.pdf"
@@ -410,6 +628,7 @@ def main() -> None:
                                       "expectancy_r": x["oos_net"]["expectancy_r"],
                                       "profit_factor": x["oos_net"]["profit_factor"],
                                       "eligible": x["gate"]["eligible"]} for x in report["strategies"]],
+                      "table_18": report.get("table_18"),
                       "pdf": str(pdf_path), "json": str(json_path)}, ensure_ascii=False, indent=2))
 
 

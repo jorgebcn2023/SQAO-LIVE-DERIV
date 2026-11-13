@@ -1,11 +1,37 @@
 """Regression tests for Step Index quant research functions."""
 import math
+from ENGINE.test_chart_indicator_audit import (
+    test_indicator_snapshot_reports_all_standard_indicators,
+    test_mtf_confluence_uses_weighted_groups_without_counting_correlated_indicators_twice,
+    test_missing_data_is_not_fabricated,
+    test_v2_reports_invalid_rows_and_uses_coverage_adjusted_score,
+    test_v2_stochastic_slow_k_and_d_are_distinct_series_when_moving,
+)
 from ENGINE.step_index_quant import (
     acceptance_gate, analyze_backtest, equity_stats, log_compounding, log_returns, wilson_interval,
 )
 from ENGINE.step_index_research import (
     aggregate_weekly_from_daily, backtest_m5, closed_candles, log_distribution, signal_m5,
 )
+
+
+def test_table18_historical_oos_levels_are_numeric_and_directional():
+    from ENGINE.step_index_strategy_lab import historical_oos_levels
+    short_trade = {
+        "sample": "out_of_sample", "signal_epoch": 1_800_000_000,
+        "direction": "SHORT", "entry": 7308.7, "risk_price": 6.0,
+        "exit_reason": "STOP", "net_r": -1.0,
+    }
+    levels = historical_oos_levels(short_trade, 1.5)
+    assert levels is not None
+    assert levels["entry"] == 7308.7
+    assert levels["stop_loss"] == 7314.7
+    assert levels["take_profit"] == 7299.7
+    assert levels["risk_reward"] == "1:1.5"
+    assert levels["sample"] == "out_of_sample"
+    assert levels["is_current_signal"] is False
+    assert historical_oos_levels({**short_trade, "sample": "train"}, 1.5) is None
+    assert historical_oos_levels({**short_trade, "entry": float("nan")}, 1.5) is None
 
 
 def test_log_returns():
@@ -153,4 +179,9 @@ if __name__ == "__main__":
     test_backtest_rejects_unvalidated_costs()
     test_executive_pdf_generation()
     test_aggregate_weekly_from_daily_uses_only_completed_weeks()
+    test_indicator_snapshot_reports_all_standard_indicators()
+    test_mtf_confluence_uses_weighted_groups_without_counting_correlated_indicators_twice()
+    test_missing_data_is_not_fabricated()
+    test_v2_reports_invalid_rows_and_uses_coverage_adjusted_score()
+    test_v2_stochastic_slow_k_and_d_are_distinct_series_when_moving()
     print("Step Index quant tests: OK")
