@@ -327,6 +327,15 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         ["Base de métricas", str(table18.get("performance_basis", "N/D"))],
         ["Puerta estadística 70%", str(table18.get("eligibility", "N/D"))],
         ["Dictamen", str(table18.get("status", "N/D"))],
+        ["Escenario actual", str((table18.get("scenario") or {}).get("status", "NOT_PUBLISHED_NO_TRADE"))],
+        ["Dirección escenario", str((table18.get("scenario") or {}).get("direction") or "NOT PUBLISHED — NO_TRADE")],
+        ["Apertura escenario", fmt_price((table18.get("scenario") or {}).get("entry"))],
+        ["Stop Loss escenario", fmt_price((table18.get("scenario") or {}).get("stop_loss"))],
+        ["Take Profit escenario", fmt_price((table18.get("scenario") or {}).get("take_profit"))],
+        ["Riesgo / objetivo", (num((table18.get("scenario") or {}).get("risk_price_units")) + " / " +
+                               num((table18.get("scenario") or {}).get("reward_price_units")) + " puntos")],
+        ["Risk/Reward", str((table18.get("scenario") or {}).get("risk_reward") or "N/D")],
+        ["Fuente de precios", str((table18.get("scenario") or {}).get("source", "N/D"))],
     ]
     t18 = Table(t18_rows, colWidths=[6*cm, 19*cm], repeatRows=1)
     t18.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
@@ -453,7 +462,35 @@ def main() -> None:
         "performance_basis": report.get("performance_basis"),
         "eligibility": "PASS" if best and best.get("gate", {}).get("eligible") else "FAIL — 70% gate not met or costs not verified",
         "status": "CANDIDATA HISTÓRICA PARA REVISIÓN" if best else "SIN CANDIDATA EVALUABLE",
-        "not_a_live_signal": True
+        "not_a_live_signal": True,
+        # Prices are sourced only from the exact-epoch Deriv M1 open in the v23
+        # detector. Screenshots are never treated as an exact OHLC price source.
+        # Publish levels only if both the OOS candidate and current trigger pass.
+        "scenario": {
+            "direction": setup.get("direction") if best and best.get("gate", {}).get("eligible")
+                         and setup.get("execution_price_confirmed") else None,
+            "entry": setup.get("entry_price") if best and best.get("gate", {}).get("eligible")
+                     and setup.get("execution_price_confirmed") else None,
+            "stop_loss": setup.get("stop_loss") if best and best.get("gate", {}).get("eligible")
+                         and setup.get("execution_price_confirmed") else None,
+            "take_profit": setup.get("take_profit") if best and best.get("gate", {}).get("eligible")
+                           and setup.get("execution_price_confirmed") else None,
+            "risk_price_units": (setup.get("execution_levels") or {}).get("risk_price_units")
+                                if best and best.get("gate", {}).get("eligible")
+                                and setup.get("execution_price_confirmed") else None,
+            "reward_price_units": (setup.get("execution_levels") or {}).get("reward_price_units")
+                                  if best and best.get("gate", {}).get("eligible")
+                                  and setup.get("execution_price_confirmed") else None,
+            "risk_reward": (setup.get("execution_levels") or {}).get("risk_reward")
+                           if best and best.get("gate", {}).get("eligible")
+                           and setup.get("execution_price_confirmed") else None,
+            "source": "Deriv closed M1 trigger + exact next-M1 candle open; ATR14 M1",
+            "trigger_epoch": setup.get("decision_epoch"),
+            "entry_epoch": setup.get("decision_epoch") if setup.get("execution_price_confirmed") else None,
+            "status": "CONDITIONAL_SCENARIO_ONLY" if best and best.get("gate", {}).get("eligible")
+                      and setup.get("execution_price_confirmed") else "NOT_PUBLISHED_NO_TRADE",
+            "visual_screenshots_used_as_price_source": False
+        }
     }
     out.mkdir(parents=True, exist_ok=True)
     json_path, pdf_path = out / "step_index_strategy_lab.json", out / "step_index_strategy_lab.pdf"
