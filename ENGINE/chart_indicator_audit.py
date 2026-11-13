@@ -205,7 +205,9 @@ def indicator_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
                "SHORT" if adxv is not None and adxv >= 20 and pdi is not None and mdi is not None and mdi > pdi else
                "NEUTRAL" if adxv is not None and pdi is not None and mdi is not None else None)
     votes = {"trend": _vote(trend_vote), "momentum_macd": _vote(macd_vote),
-             "oscillator_rsi_stoch": _vote(osc_vote), "directional_strength_adx_di": _vote(di_vote)}
+             "oscillator_rsi_stoch": _vote(osc_vote), "directional_strength_adx_di": _vote(di_vote),
+             "volatility_bollinger": "AVAILABLE" if bb["bollinger20_width"] is not None else "NOT_AVAILABLE",
+             "atr14": "AVAILABLE" if atr is not None else "NOT_AVAILABLE"}
     last_epoch = int(bars[-1]["epoch"]) if bars and "epoch" in bars[-1] else None
     return {
         "version": VERSION, "candles_used": len(bars), "last_closed_epoch": last_epoch,
