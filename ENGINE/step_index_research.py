@@ -303,7 +303,8 @@ def backtest_m5(
             "signal_epoch": decision_epoch, "entry_epoch": int(entry_bar["epoch"]),
             "direction": direction, "entry": entry, "exit": exit_price, "stop": stop, "target": target,
             "risk_price": risk, "gross_r": gross_r, "cost_r": cost_r, "net_r": net_r,
-            "exit_reason": exit_reason, "sample": "train" if i < split else "out_of_sample",
+            "exit_reason": exit_reason, "exit_epoch": int(m5[j]["epoch"]),
+            "holding_bars": j - i, "sample": "train" if i < split else "out_of_sample",
             "indicator_snapshots_at_signal": {
                 tf: chart_indicator_snapshot([row for row in (all_frames or {}).get(tf, [])
                     if int(row["epoch"]) + GRANULARITY[tf] <= decision_epoch])
