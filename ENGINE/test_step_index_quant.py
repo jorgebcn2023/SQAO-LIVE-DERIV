@@ -4,6 +4,8 @@ from ENGINE.test_chart_indicator_audit import (
     test_indicator_snapshot_reports_all_standard_indicators,
     test_mtf_confluence_uses_weighted_groups_without_counting_correlated_indicators_twice,
     test_missing_data_is_not_fabricated,
+    test_v2_reports_invalid_rows_and_uses_coverage_adjusted_score,
+    test_v2_stochastic_slow_k_and_d_are_distinct_series_when_moving,
 )
 from ENGINE.step_index_quant import (
     acceptance_gate, analyze_backtest, equity_stats, log_compounding, log_returns, wilson_interval,
@@ -180,4 +182,6 @@ if __name__ == "__main__":
     test_indicator_snapshot_reports_all_standard_indicators()
     test_mtf_confluence_uses_weighted_groups_without_counting_correlated_indicators_twice()
     test_missing_data_is_not_fabricated()
+    test_v2_reports_invalid_rows_and_uses_coverage_adjusted_score()
+    test_v2_stochastic_slow_k_and_d_are_distinct_series_when_moving()
     print("Step Index quant tests: OK")
