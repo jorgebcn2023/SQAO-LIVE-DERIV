@@ -318,6 +318,12 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                              ("GRID",(0,0),(-1,-1),0.5,colors.grey),
                              ("FONTSIZE",(0,0),(-1,-1),7),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
     story.extend([t17, Spacer(1, 5)])
+    t17_score = report.get("chart_indicator_audit", {}).get("score", {})
+    story.append(Paragraph(
+        "Confluencia técnica agrupada (descriptiva, no probabilidad): LONG " +
+        f"{t17_score.get('long','N/D')}/{t17_score.get('max_per_side','N/D')} ({t17_score.get('long_pct',0):.1f}%) · " +
+        "SHORT " + f"{t17_score.get('short','N/D')}/{t17_score.get('max_per_side','N/D')} ({t17_score.get('short_pct',0):.1f}%) · " +
+        str(t17_score.get("decision", "N/D")), styles["BodyText"]))
     money = table17.get("provisional_monetary_scenarios", {})
     risk_usd, reward_usd = money.get("risk_usd", {}), money.get("reward_usd", {})
     money_rows = [["Volumen", "Riesgo teórico USD", "Beneficio teórico USD"],
