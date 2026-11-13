@@ -18,6 +18,7 @@ from typing import Any
 import websockets
 
 from .step_index_quant import analyze_backtest, equity_stats, log_returns, acceptance_gate
+from .chart_indicator_audit import TIMEFRAMES as CHART_TIMEFRAMES, indicator_snapshot as chart_indicator_snapshot, build_mtf_audit
 
 WS = os.getenv("DERIV_PUBLIC_WS", "wss://api.derivws.com/trading/v1/options/ws/public")
 GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 86400, "W1": 604800}
@@ -232,6 +233,7 @@ def backtest_m5(
     m5: list[dict[str, Any]], m15: list[dict[str, Any]], h1: list[dict[str, Any]],
     *, horizon: int = 5, rr: float = 1.5, atr_mult: float = 1.2,
     round_trip_cost_price: float | None = None, train_fraction: float = 0.70,
+    all_frames: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Chronological test with next-bar-open entry, M15/H1 filters and stop-first ties."""
     if not 0.5 < train_fraction < 0.95:
@@ -301,7 +303,13 @@ def backtest_m5(
             "signal_epoch": decision_epoch, "entry_epoch": int(entry_bar["epoch"]),
             "direction": direction, "entry": entry, "exit": exit_price, "stop": stop, "target": target,
             "risk_price": risk, "gross_r": gross_r, "cost_r": cost_r, "net_r": net_r,
-            "exit_reason": exit_reason, "sample": "train" if i < split else "out_of_sample",
+            "exit_reason": exit_reason, "exit_epoch": int(m5[j]["epoch"]),
+            "holding_bars": j - i, "sample": "train" if i < split else "out_of_sample",
+            "indicator_snapshots_at_signal": {
+                tf: chart_indicator_snapshot([row for row in (all_frames or {}).get(tf, [])
+                    if int(row["epoch"]) + GRANULARITY[tf] <= decision_epoch])
+                for tf in ("D1", *CHART_TIMEFRAMES)
+            } if all_frames is not None else {},
         })
         next_allowed = last_j + 1
     train = [x for x in trades if x["sample"] == "train"]
@@ -652,7 +660,8 @@ async def run_research() -> dict[str, Any]:
                      rr=float(os.getenv("SQAO_STEP_TARGET_R", "1.5")),
                      atr_mult=float(os.getenv("SQAO_STEP_ATR_MULT", "1.2")),
                      round_trip_cost_price=cost_price,
-                     train_fraction=float(os.getenv("SQAO_STEP_TRAIN_FRACTION", "0.70")))
+                     train_fraction=float(os.getenv("SQAO_STEP_TRAIN_FRACTION", "0.70")),
+                     all_frames=frames)
     m5_closes = [float(x["close"]) for x in frames["M5"]]
     folds = oos_subperiods(bt["trades"], frames["M5"], float(os.getenv("SQAO_STEP_TRAIN_FRACTION", "0.70")), folds=4)
     setup = current_setup(frames, rr=float(os.getenv("SQAO_STEP_TARGET_R", "1.5")),
@@ -668,6 +677,7 @@ async def run_research() -> dict[str, Any]:
         "source": "Deriv public OHLC; closed candles only",
         "read_only": True,
         "indicators": snapshot(frames),
+        "chart_indicator_audit": build_mtf_audit(frames),
         "current_setup": setup,
         "log_distribution_m5": log_distribution(m5_closes),
         "backtest": bt,
