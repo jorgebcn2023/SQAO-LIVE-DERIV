@@ -143,3 +143,8 @@ The Step Index quant workflow has bounded stage timeouts and separate diagnostic
 Checkpoint artifacts preserve completed outputs for inspection and manual recovery. GitHub Actions reruns still restart from the beginning; automatic resume from a previous run's artifacts is not implemented. See `docs/SQAO_V22_RESEARCH_RELIABILITY.md`.
 
 The change does not relax the statistical acceptance gate or safety rules. Missing verified all-in costs or insufficient OOS evidence continue to produce `NO_TRADE`.
+
+
+## SQAO V2.3 — Research performance optimization
+
+The baseline Step Index backtest now avoids recalculating full-history MTF indicator snapshots for every trade. The complete MTF indicator audit remains available at report level. Repeated per-trade snapshots are opt-in with `SQAO_INCLUDE_TRADE_INDICATOR_SNAPSHOTS=1`; the default is off to reduce avoidable work on large OHLC histories. The report records this setting under `diagnostics.per_trade_indicator_snapshots_enabled`. This is a performance/diagnostic change only; it does not change the strategy, market data, costs, or acceptance gate. See `docs/SQAO_V23_RESEARCH_PERFORMANCE.md`.
