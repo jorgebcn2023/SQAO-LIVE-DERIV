@@ -27,7 +27,17 @@ MACD_RE = re.compile(r"MACD\s*\(\s*12\s*,\s*26\s*,\s*9\s*\)\s*([-+]?\d+[.,]\d+)\
 
 def _num(s: str) -> float | None:
     try:
-        return float(s.replace(",", "."))
+        value = str(s).strip().replace(" ", "")
+        if "," in value and "." in value:
+            # Infer decimal separator from the rightmost punctuation.
+            if value.rfind(",") > value.rfind("."):
+                value = value.replace(".", "").replace(",", ".")
+            else:
+                value = value.replace(",", "")
+        elif "," in value:
+            tail = value.rsplit(",", 1)[-1]
+            value = value.replace(",", "") if len(tail) == 3 else value.replace(",", ".")
+        return float(value)
     except (TypeError, ValueError):
         return None
 
@@ -142,7 +152,10 @@ def audit_chart(path: str | Path, timeframe: str | None = None) -> dict[str, Any
     raw = _ocr(p)
     text = raw.get("text", "")
     detected = [x.upper() for x in TF_RE.findall(text)]
-    tf = timeframe.upper() if timeframe else (detected[0] if detected else None)
+    supplied_tf = timeframe.upper() if timeframe else None
+    filename_tf = [x.upper() for x in TF_RE.findall(p.stem)]
+    tf = (supplied_tf if supplied_tf in TIMEFRAMES else
+          detected[0] if detected else filename_tf[0] if filename_tf else None)
     size = raw.get("image_size") or [0, 0]
     calibration = _axis_calibration(raw.get("tokens", []), size[0]) if size else {
         "status": "NOT_CALIBRATED", "axis_labels": [], "price_per_pixel": None, "intercept": None}
