@@ -307,7 +307,7 @@ def backtest_m5(
             "indicator_snapshots_at_signal": {
                 tf: chart_indicator_snapshot([row for row in (all_frames or {}).get(tf, [])
                     if int(row["epoch"]) + GRANULARITY[tf] <= decision_epoch])
-                for tf in CHART_TIMEFRAMES
+                for tf in ("D1", *CHART_TIMEFRAMES)
             } if all_frames is not None else {},
         })
         next_allowed = last_j + 1
