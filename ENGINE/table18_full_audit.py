@@ -15,10 +15,11 @@ from typing import Any
 
 TIMEFRAMES = ("D1", "H4", "H1", "M15", "M5", "M1")
 INDICATORS = (
-    "candles", "last_closed_epoch", "last_close", "ema10", "ema20", "rsi14",
-    "atr14", "macd_line", "macd_signal", "macd_histogram",
+    "candles_used", "last_closed_epoch", "last_close", "ema9", "ema20", "ema50",
+    "rsi14", "atr14", "macd_line", "macd_signal", "macd_histogram",
     "bollinger20_lower", "bollinger20_middle", "bollinger20_upper",
-    "stochastic9_k", "stochastic9_d",
+    "bollinger20_width", "bollinger20_percent_b", "adx14", "plus_di14", "minus_di14",
+    "stochastic14_k", "stochastic3_k", "stochastic3_d",
 )
 BASE_FIELDS = (
     "candidate_id", "sample", "direction", "signal_epoch", "entry_epoch",
@@ -95,15 +96,21 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
             "holding_bars": trade.get("holding_bars", "NOT_AVAILABLE"),
             "signal_time_utc": _epoch_iso(trade.get("signal_epoch")),
             "entry_time_utc": _epoch_iso(trade.get("entry_epoch")),
-            "indicator_provenance": "LATEST_REPORT_CONTEXT_NOT_HISTORICAL_AT_ENTRY",
+            "indicator_provenance": "HISTORICAL_AT_SIGNAL" if trade.get("indicator_snapshots_at_signal") else "LATEST_REPORT_CONTEXT_NOT_HISTORICAL_AT_ENTRY",
         }
         # Latest indicator values are retained per timeframe without pretending
         # that these are the values that existed at the historical signal time.
         for tf in TIMEFRAMES:
-            snap = indicators.get(tf) or {}
+            historical = trade.get("indicator_snapshots_at_signal") or {}
+            snap = historical.get(tf) or indicators.get(tf) or {}
+            prefix = f"signal_{tf.lower()}_" if historical.get(tf) else f"latest_{tf.lower()}_"
             for key in INDICATORS:
-                row[f"latest_{tf.lower()}_{key}"] = snap.get(key)
-            row[f"latest_{tf.lower()}_direction"] = snap.get("direction", "NOT_AVAILABLE")
+                row[f"{prefix}{key}"] = snap.get(key)
+            row[f"{prefix}ema_stack"] = snap.get("ema_stack", "NOT_AVAILABLE")
+            row[f"{prefix}trend_vote"] = (snap.get("group_votes") or {}).get("trend", "NOT_AVAILABLE")
+            row[f"{prefix}macd_vote"] = (snap.get("group_votes") or {}).get("momentum_macd", "NOT_AVAILABLE")
+            row[f"{prefix}oscillator_vote"] = (snap.get("group_votes") or {}).get("oscillator_rsi_stoch", "NOT_AVAILABLE")
+            row[f"{prefix}adx_di_vote"] = (snap.get("group_votes") or {}).get("directional_strength_adx_di", "NOT_AVAILABLE")
         rows.append(row)
 
     def summarize(sample: str) -> dict[str, Any]:
@@ -153,7 +160,7 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
         "read_only": True,
         "rule": backtest.get("rule"),
         "parameters": params,
-        "methodology": "One row per actual chronological backtest trade. Entry/SL/TP/exit are copied from recorded OHLC ledger. Latest MTF indicators are context only; historical-at-entry indicator values require per-trade recomputation from OHLC.",
+        "methodology": "One row per actual chronological backtest trade. Entry/SL/TP/exit are copied from recorded OHLC ledger. EMA9/20/50, Bollinger20/2, MACD12/26/9, Wilder RSI/ATR/ADX/DI14 and Stochastic14/3/3 are recomputed only from candles closed by each signal timestamp. Missing fields remain null.",
         "field_order": list(rows[0].keys()) if rows else list(BASE_FIELDS),
         "row_count": len(rows),
         "summary": {sample: summarize(sample) for sample in ("train", "out_of_sample")},
