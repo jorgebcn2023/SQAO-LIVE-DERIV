@@ -2,6 +2,7 @@
 import json, math, os, asyncio
 from pathlib import Path
 from datetime import datetime, timezone
+from bisect import bisect_right
 from ENGINE.step_index_scalping_v23 import TF, detect, market
 
 USD_PER_PRICE_UNIT_AT_010 = 1.0  # provisional user-declared conversion
@@ -75,10 +76,17 @@ def replay(frames,cost=None):
     if cost is not None and (not math.isfinite(float(cost)) or float(cost)<0):
         raise ValueError("round-trip cost must be finite and non-negative")
     m1=frames["M1"]; trades=[]; next_i=0
+    # Build sorted epoch indexes once. The detector only consumes the latest
+    # 100 closed bars per timeframe, so never rescan/copy the entire history
+    # on every M1 iteration (the previous comprehension was O(N^2)).
+    indexed={tf:(rows,[int(r["epoch"]) for r in rows]) for tf,rows in frames.items()}
     for i in range(80,len(m1)-MAX_HOLD_M1_BARS-1):
         if i<next_i: continue
         decision=int(m1[i]["epoch"])+TF["M1"]
-        hist={tf:[r for r in rows if int(r["epoch"])+TF[tf]<=decision] for tf,rows in frames.items()}
+        hist={}
+        for tf,(rows,epochs) in indexed.items():
+            end=bisect_right(epochs,decision-TF[tf])
+            hist[tf]=rows[max(0,end-100):end]
         sig=detect(hist)
         if not sig.get("confirmed") or sig.get("direction") not in {"LONG","SHORT"}: continue
         # Match live execution: only the immediately following M1 epoch is a valid entry.
