@@ -38,6 +38,35 @@ def _direction_at(cache: tuple[list[int], list[float | None], list[float | None]
     return _cached_trend_at(cache, epoch)
 
 
+def historical_oos_levels(trade: dict[str, Any], target_r: float) -> dict[str, Any] | None:
+    """Build auditable historical entry/SL/TP from one recorded OOS trade."""
+    try:
+        entry = float(trade["entry"])
+        risk = float(trade["risk_price"])
+        rr = float(target_r)
+        direction = str(trade["direction"]).upper()
+        epoch = int(trade["signal_epoch"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if (direction not in {"LONG", "SHORT"} or not all(math.isfinite(x) for x in (entry, risk, rr))
+            or entry <= 0 or risk <= 0 or rr <= 0 or epoch <= 0
+            or trade.get("sample") != "out_of_sample"):
+        return None
+    sign = 1.0 if direction == "LONG" else -1.0
+    return {
+        "direction": direction, "entry": entry,
+        "stop_loss": entry - sign * risk,
+        "take_profit": entry + sign * risk * rr,
+        "risk_price_units": risk, "reward_price_units": risk * rr,
+        "risk_reward": f"1:{rr:g}", "signal_epoch": epoch,
+        "signal_time_utc": datetime.fromtimestamp(epoch, timezone.utc).isoformat(),
+        "entry_source": "Deriv M5 next-candle open recorded by chronological OOS backtest",
+        "stop_target_source": "ATR(14) risk distance recorded by backtest; target_R strategy parameter",
+        "exit_reason": trade.get("exit_reason"), "realized_R": trade.get("net_r"),
+        "sample": "out_of_sample", "is_current_signal": False,
+    }
+
+
 def _signal(name: str, i: int, rows: list[dict[str, Any]],
             closes: list[float], e10: list[float | None], e20: list[float | None],
             rsi_values: list[float | None]) -> str | None:
@@ -454,36 +483,7 @@ def main() -> None:
     # reconstructed from its recorded ATR risk distance and fixed target_R.
     # This is explicitly historical evidence, never a current live signal.
     historical_trade = max(oos_trades, key=lambda t: int(t.get("signal_epoch", 0)), default=None)
-    historical_example = None
-    if historical_trade:
-        try:
-            h_entry = float(historical_trade["entry"])
-            h_risk = float(historical_trade["risk_price"])
-            h_direction = str(historical_trade["direction"]).upper()
-            h_rr = float(best_params.get("target_R", 1.5))
-            if (h_direction in {"LONG", "SHORT"} and math.isfinite(h_entry)
-                    and math.isfinite(h_risk) and math.isfinite(h_rr)
-                    and h_entry > 0 and h_risk > 0 and h_rr > 0):
-                h_sign = 1.0 if h_direction == "LONG" else -1.0
-                historical_example = {
-                    "direction": h_direction,
-                    "entry": h_entry,
-                    "stop_loss": h_entry - h_sign * h_risk,
-                    "take_profit": h_entry + h_sign * h_risk * h_rr,
-                    "risk_price_units": h_risk,
-                    "reward_price_units": h_risk * h_rr,
-                    "risk_reward": f"1:{h_rr:g}",
-                    "signal_epoch": int(historical_trade["signal_epoch"]),
-                    "signal_time_utc": datetime.fromtimestamp(int(historical_trade["signal_epoch"]), timezone.utc).isoformat(),
-                    "entry_source": "Deriv M5 next-candle open recorded by chronological OOS backtest",
-                    "stop_target_source": "ATR(14) risk distance recorded by backtest; target_R strategy parameter",
-                    "exit_reason": historical_trade.get("exit_reason"),
-                    "realized_R": historical_trade.get("net_r"),
-                    "sample": "out_of_sample",
-                    "is_current_signal": False
-                }
-        except (KeyError, TypeError, ValueError, OverflowError):
-            historical_example = None
+    historical_example = historical_oos_levels(historical_trade, float(best_params.get("target_R", 1.5))) if historical_trade else None
     report["table_18"] = {
         "purpose": "Best observed historical strategy from the predeclared Strategy Lab candidates; independent of live detector Table 17",
         "ranking_basis": "OOS observed win rate descending; expectancy and profit factor as tie-breakers",
