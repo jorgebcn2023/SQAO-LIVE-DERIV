@@ -338,6 +338,13 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                                num((table18.get("scenario") or {}).get("reward_price_units")) + " puntos")],
         ["Risk/Reward", str((table18.get("scenario") or {}).get("risk_reward") or "N/D")],
         ["Fuente de precios", str((table18.get("scenario") or {}).get("source", "N/D"))],
+        ["Ejemplo OOS histórico (no señal actual)", "—"],
+        ["Dirección histórica", str((table18.get("historical_example_oos_trade") or {}).get("direction", "N/D"))],
+        ["Apertura histórica", fmt_price((table18.get("historical_example_oos_trade") or {}).get("entry"))],
+        ["Stop Loss histórico", fmt_price((table18.get("historical_example_oos_trade") or {}).get("stop_loss"))],
+        ["Take Profit histórico", fmt_price((table18.get("historical_example_oos_trade") or {}).get("take_profit"))],
+        ["Fecha/hora de señal histórica UTC", str((table18.get("historical_example_oos_trade") or {}).get("signal_time_utc", "N/D"))],
+        ["Origen entrada / SL / TP", str((table18.get("historical_example_oos_trade") or {}).get("entry_source", "N/D")) + " / " + str((table18.get("historical_example_oos_trade") or {}).get("stop_target_source", "N/D"))],
     ]
     t18 = Table(t18_rows, colWidths=[6*cm, 19*cm], repeatRows=1)
     t18.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
@@ -442,6 +449,41 @@ def main() -> None:
                   " — " + datetime.fromtimestamp(last_epoch, timezone.utc).isoformat())
     best_stats = best.get("oos_net", {}) if best else {}
     best_params = best.get("parameters", {}) if best else {}
+    # A representative historical OOS trade supplies real numeric entry/SL/TP.
+    # Entry is the next M5 candle open recorded by the backtest; SL/TP are
+    # reconstructed from its recorded ATR risk distance and fixed target_R.
+    # This is explicitly historical evidence, never a current live signal.
+    historical_trade = max(oos_trades, key=lambda t: int(t.get("signal_epoch", 0)), default=None)
+    historical_example = None
+    if historical_trade:
+        try:
+            h_entry = float(historical_trade["entry"])
+            h_risk = float(historical_trade["risk_price"])
+            h_direction = str(historical_trade["direction"]).upper()
+            h_rr = float(best_params.get("target_R", 1.5))
+            if (h_direction in {"LONG", "SHORT"} and math.isfinite(h_entry)
+                    and math.isfinite(h_risk) and math.isfinite(h_rr)
+                    and h_entry > 0 and h_risk > 0 and h_rr > 0):
+                h_sign = 1.0 if h_direction == "LONG" else -1.0
+                historical_example = {
+                    "direction": h_direction,
+                    "entry": h_entry,
+                    "stop_loss": h_entry - h_sign * h_risk,
+                    "take_profit": h_entry + h_sign * h_risk * h_rr,
+                    "risk_price_units": h_risk,
+                    "reward_price_units": h_risk * h_rr,
+                    "risk_reward": f"1:{h_rr:g}",
+                    "signal_epoch": int(historical_trade["signal_epoch"]),
+                    "signal_time_utc": datetime.fromtimestamp(int(historical_trade["signal_epoch"]), timezone.utc).isoformat(),
+                    "entry_source": "Deriv M5 next-candle open recorded by chronological OOS backtest",
+                    "stop_target_source": "ATR(14) risk distance recorded by backtest; target_R strategy parameter",
+                    "exit_reason": historical_trade.get("exit_reason"),
+                    "realized_R": historical_trade.get("net_r"),
+                    "sample": "out_of_sample",
+                    "is_current_signal": False
+                }
+        except (KeyError, TypeError, ValueError, OverflowError):
+            historical_example = None
     report["table_18"] = {
         "purpose": "Best observed historical strategy from the predeclared Strategy Lab candidates; independent of live detector Table 17",
         "ranking_basis": "OOS observed win rate descending; expectancy and profit factor as tie-breakers",
@@ -464,6 +506,7 @@ def main() -> None:
         "performance_basis": report.get("performance_basis"),
         "eligibility": "PASS" if best and best.get("gate", {}).get("eligible") else "FAIL — 70% gate not met or costs not verified",
         "status": "CANDIDATA HISTÓRICA PARA REVISIÓN" if best else "SIN CANDIDATA EVALUABLE",
+        "historical_example_oos_trade": historical_example,
         "not_a_live_signal": True,
         # Prices are sourced only from the exact-epoch Deriv M1 open in the v23
         # detector. Screenshots are never treated as an exact OHLC price source.
