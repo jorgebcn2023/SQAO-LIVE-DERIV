@@ -217,7 +217,8 @@ def signal_m5(hist: list[dict[str, Any]]) -> str | None:
     if len(hist) < 30:
         return None
     c = [float(r["close"]) for r in hist]
-    fast, slow = ema(c, 10), ema(c, 20)    prior = hist[-21:-1]
+    fast, slow = ema(c, 10), ema(c, 20)
+    prior = hist[-21:-1]
     if fast is None or slow is None:
         return None
     if c[-1] > max(float(x["high"]) for x in prior) and fast > slow:
