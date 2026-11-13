@@ -310,6 +310,8 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                   styles["BodyText"]),
         Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.", styles["Heading3"])])
     table18 = report.get("table_18", {})
+    # Safe numeric display for conditional levels; blocked scenarios stay unpublished.
+    fmt_price = lambda x: "NOT PUBLISHED — NO_TRADE" if x is None else f"{float(x):.2f}"
     story.append(Spacer(1, 10))
     story.append(Paragraph("TABLA 18 — FICHA DE LA MEJOR CANDIDATA HISTÓRICA", styles["Heading2"]))
     t18_rows = [
