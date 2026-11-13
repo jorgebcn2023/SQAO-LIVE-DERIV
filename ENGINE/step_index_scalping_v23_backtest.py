@@ -241,28 +241,7 @@ def build_table17(live_path, gross_oos, net_oos, cost_status, eligibility):
         "entry_valid_until_utc": datetime.fromtimestamp(entry_epoch + 60, timezone.utc).isoformat() if confirmed else None,
         "trade_expiry_epoch": (entry_epoch + MAX_HOLD_M1_BARS * 60) if confirmed else None,
         "trade_expiry_utc": datetime.fromtimestamp(entry_epoch + MAX_HOLD_M1_BARS * 60, timezone.utc).isoformat() if confirmed else None,
-        "timeframe_confirmations": {
-            tf: {
-                "trend_ema10_20": (
-                    "LONG" if len((live.get("last_closed") or {}).get(tf, [])) >= 20 and
-                    ema([float(x["close"]) for x in live["last_closed"][tf]], 10) >
-                    ema([float(x["close"]) for x in live["last_closed"][tf]], 20)
-                    else "SHORT" if len((live.get("last_closed") or {}).get(tf, [])) >= 20 and
-                    ema([float(x["close"]) for x in live["last_closed"][tf]], 10) <
-                    ema([float(x["close"]) for x in live["last_closed"][tf]], 20)
-                    else "NOT_AVAILABLE"
-                ),
-                "aligned_with_signal": bool(confirmed and (
-                    ("LONG" if len((live.get("last_closed") or {}).get(tf, [])) >= 20 and
-                     ema([float(x["close"]) for x in live["last_closed"][tf]], 10) >
-                     ema([float(x["close"]) for x in live["last_closed"][tf]], 20)
-                     else "SHORT" if len((live.get("last_closed") or {}).get(tf, [])) >= 20 and
-                     ema([float(x["close"]) for x in live["last_closed"][tf]], 10) <
-                     ema([float(x["close"]) for x in live["last_closed"][tf]], 20)
-                     else None) == direction
-                ))
-            } for tf in ("H4", "H1", "M15", "M5", "M1")
-        },
+        "timeframe_confirmations": setup.get("timeframe_confirmations", {}),
         "position_size_lots": None,
         "monetary_risk": None,
         "position_size_status": "BLOCKED_NO_VERIFIED_CONTRACT_SPEC_OR_ACCOUNT_RISK_BUDGET",
