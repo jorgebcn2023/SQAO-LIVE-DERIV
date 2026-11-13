@@ -133,7 +133,7 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
             wilson = [None, None]
         return {
             "trades": n, "wins": wins, "losses": losses,
-            "win_rate": wins/n if n else None, "wilson95": wilson,
+            "win_rate": wins/n if n else None, "win_rate_basis": "NET_R" if net is not None else "GROSS_R_COSTS_UNCONFIGURED", "wilson95": wilson,
             "expectancy_gross_r": sum(gross)/n if n else None,
             "profit_factor_gross": (sum(x for x in gross if x > 0) / -sum(x for x in gross if x < 0)) if any(x < 0 for x in gross) else None,
             "max_drawdown_gross_r": _max_drawdown(gross),
