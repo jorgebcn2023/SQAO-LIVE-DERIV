@@ -4,7 +4,7 @@ from __future__ import annotations
 import unittest
 
 from ENGINE.chart_visual_extraction import (
-    _axis_calibration, _extract_indicator_readings, table18_template,
+    _axis_calibration, _extract_indicator_readings, _num, table18_template,
 )
 
 
@@ -22,6 +22,11 @@ class ChartVisualExtractionTests(unittest.TestCase):
         result = _axis_calibration(tokens, 1000)
         self.assertEqual(result["status"], "CALIBRATED")
         self.assertAlmostEqual(result["price_per_pixel"], -1.0, places=6)
+
+    def test_locale_price_parsing(self):
+        self.assertEqual(_num("7,306.3"), 7306.3)
+        self.assertEqual(_num("7.306,3"), 7306.3)
+        self.assertEqual(_num("7306,3"), 7306.3)
 
     def test_table18_keeps_unknowns_null(self):
         table = table18_template(7306.3)
