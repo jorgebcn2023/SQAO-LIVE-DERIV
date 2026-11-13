@@ -1,5 +1,10 @@
 """Regression tests for Step Index quant research functions."""
 import math
+from ENGINE.test_chart_indicator_audit import (
+    test_indicator_snapshot_reports_all_standard_indicators,
+    test_mtf_confluence_uses_weighted_groups_without_counting_correlated_indicators_twice,
+    test_missing_data_is_not_fabricated,
+)
 from ENGINE.step_index_quant import (
     acceptance_gate, analyze_backtest, equity_stats, log_compounding, log_returns, wilson_interval,
 )
@@ -172,4 +177,7 @@ if __name__ == "__main__":
     test_backtest_rejects_unvalidated_costs()
     test_executive_pdf_generation()
     test_aggregate_weekly_from_daily_uses_only_completed_weeks()
+    test_indicator_snapshot_reports_all_standard_indicators()
+    test_mtf_confluence_uses_weighted_groups_without_counting_correlated_indicators_twice()
+    test_missing_data_is_not_fabricated()
     print("Step Index quant tests: OK")
