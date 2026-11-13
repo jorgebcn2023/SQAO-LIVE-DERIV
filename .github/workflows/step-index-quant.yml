@@ -84,6 +84,7 @@ jobs:
           SQAO_STEP_CANDLES_M5: '20000'
           SQAO_STEP_CANDLES_M15: '7000'
           SQAO_STEP_CANDLES_H1: '2500'
+          SQAO_STEP_CANDLES_H4: '1500'
           SQAO_STEP_CANDLES_D1: '1000'
           SQAO_STEP_CANDLES_W1: '260'
           SQAO_STEP_HORIZON_M5: '5'
