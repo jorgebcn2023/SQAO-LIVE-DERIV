@@ -40,8 +40,12 @@ def _ocr(path: str | Path) -> dict[str, Any]:
     except ImportError as exc:
         return {"status": "OCR_DEPENDENCY_MISSING", "error": str(exc),
                 "text": "", "tokens": [], "image_size": None}
-    image = Image.open(path).convert("RGB")
-    data = pytesseract.image_to_data(image, output_type=Output.DICT, config="--psm 11")
+    try:
+        image = Image.open(path).convert("RGB")
+        data = pytesseract.image_to_data(image, output_type=Output.DICT, config="--psm 11")
+    except Exception as exc:
+        return {"status": "OCR_ENGINE_UNAVAILABLE", "error": str(exc),
+                "text": "", "tokens": [], "image_size": None}
     tokens = []
     for i, raw in enumerate(data.get("text", [])):
         value = str(raw).strip()
