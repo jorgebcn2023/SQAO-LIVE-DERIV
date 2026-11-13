@@ -90,7 +90,7 @@ def analyze_images(
 
     client = OpenAI(api_key=key)
     snapshot_text = json.dumps(market_snapshot or {}, ensure_ascii=False, indent=2)[:50000]
-    image_manifest = "\\n".join(f"- {label}" for _, label in image_items)
+    image_manifest = "\n".join(f"- {label}" for _, label in image_items)
     visual_audit = build_visual_audit({label: path for path, label in image_items})
     visual_audit_text = json.dumps(visual_audit, ensure_ascii=False, indent=2)[:50000]
     content = [{
