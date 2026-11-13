@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Iterable
 
 from openai import OpenAI
-
 from ENGINE.chart_visual_extraction import build_visual_audit
 
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6")
@@ -91,8 +90,7 @@ def analyze_images(
 
     client = OpenAI(api_key=key)
     snapshot_text = json.dumps(market_snapshot or {}, ensure_ascii=False, indent=2)[:50000]
-    image_manifest = "
-".join(f"- {label}" for _, label in image_items)
+    image_manifest = "\\n".join(f"- {label}" for _, label in image_items)
     visual_audit = build_visual_audit({label: path for path, label in image_items})
     visual_audit_text = json.dumps(visual_audit, ensure_ascii=False, indent=2)[:50000]
     content = [{
@@ -100,19 +98,10 @@ def analyze_images(
         "text": (
             "Analyze these Step Index charts as one MTF set. Use visible timeframe labels. "
             "Cross-check every available timeframe against the quantitative snapshot below. "
-            "If a timeframe is missing, duplicated, unreadable, stale, or temporally inconsistent, state it explicitly.
-
-"
-            f"Uploaded image manifest:
-{image_manifest}
-
-"
-            f"SQAO live quantitative snapshot:
-{snapshot_text}
-
-"
-            f"Automated screenshot OCR/geometry extraction (cross-check; may contain OCR errors):
-{visual_audit_text}"
+            "If a timeframe is missing, duplicated, unreadable, stale, or temporally inconsistent, state it explicitly.\n\n"
+            f"Uploaded image manifest:\n{image_manifest}\n\n"
+            f"SQAO live quantitative snapshot:\n{snapshot_text}\n\n"
+            f"Automated screenshot OCR/geometry extraction (cross-check; may contain OCR errors):\n{visual_audit_text}"
         ),
     }]
     for path, label in image_items:
