@@ -473,7 +473,8 @@ def main() -> None:
                                       "expectancy_r": x["oos_net"]["expectancy_r"],
                                       "profit_factor": x["oos_net"]["profit_factor"],
                                       "eligible": x["gate"]["eligible"]} for x in report["strategies"]],
-                      "table_18": report.get("table_18"),\n                      "pdf": str(pdf_path), "json": str(json_path)}, ensure_ascii=False, indent=2))
+                      "table_18": report.get("table_18"),
+                      "pdf": str(pdf_path), "json": str(json_path)}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
