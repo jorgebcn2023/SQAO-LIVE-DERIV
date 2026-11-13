@@ -43,6 +43,10 @@ class BacktestV23Tests(unittest.TestCase):
             self.assertIsNone(row["entry_price"])
             self.assertIsNone(row["stop_loss"])
             self.assertEqual(row["position_size_scenarios"],{})
+            self.assertIsNone(row["activation_epoch"])
+            self.assertIsNone(row["entry_valid_until_epoch"])
+            self.assertIsNone(row["trade_expiry_epoch"])
+            self.assertIsNone(row["position_size_lots"])
 
     def test_table17_operational_levels_only_with_exact_confirmed_open(self):
         with tempfile.TemporaryDirectory() as td:
@@ -53,6 +57,7 @@ class BacktestV23Tests(unittest.TestCase):
                 "setup":{"confirmed":True,"execution_price_confirmed":True,
                     "status":"CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION","direction":"LONG",
                     "decision_epoch":120,"atr14_m1":0.5,
+                    "timeframe_confirmations":{"H4":{"aligned":True},"H1":{"aligned":True},"M15":{"aligned":True},"M5":{"aligned":True},"M1":{"aligned":True}},
                     "execution_levels":{"entry":100,"stop_loss":99.4,"take_profit":100.9,
                         "risk_price_units":0.6,"reward_price_units":0.9,"risk_reward":"1:1.5"}}
             }))
@@ -64,6 +69,15 @@ class BacktestV23Tests(unittest.TestCase):
             self.assertIn("0.10",row["position_size_scenarios"])
             self.assertFalse(row["commission_verified"])
             self.assertFalse(row["slippage_verified"])
+            self.assertEqual(set(row["timeframe_confirmations"]), {"H4","H1","M15","M5","M1"})
+            self.assertEqual(row["activation_epoch"],120)
+            self.assertEqual(row["entry_valid_until_epoch"],180)
+            self.assertEqual(row["trade_expiry_epoch"],1320)
+            self.assertIsNone(row["position_size_lots"])
+            self.assertIsNone(row["monetary_risk"])
+            self.assertEqual(row["position_size_status"],"BLOCKED_NO_VERIFIED_CONTRACT_SPEC_OR_ACCOUNT_RISK_BUDGET")
+            self.assertIsNone(row["cost_breakdown"]["commission"])
+            self.assertEqual(row["cost_breakdown_status"],"NOT_VERIFIED_FROM_BROKER")
 
     def test_table17_rejects_wrong_next_m1_epoch(self):
         with tempfile.TemporaryDirectory() as td:
