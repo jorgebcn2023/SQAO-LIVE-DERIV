@@ -634,6 +634,19 @@ def write_pdf(report: dict[str, Any], path: Path, chart_paths: dict[str, str] | 
     chart.add(PolyLine(pts, strokeColor=colors.HexColor("#17657A"), strokeWidth=1.5))
     chart.add(String(8, 127, f"OOS equity R | min={low:.2f} max={high:.2f}", fontSize=8, fillColor=colors.HexColor("#17324D")))
     chart.add(String(8, 4, "Trade index", fontSize=7, fillColor=colors.HexColor("#596B7A")))
+    chart_flow = [PageBreak()]
+    for tf in ("M1", "M5", "M15", "H1", "H4"):
+        if chart_paths and tf in chart_paths:
+            chart_flow.extend([
+                p(f"Gráfico {tf} — fuente Deriv OHLC cerrada", "SQH2"),
+                PDFImage(chart_paths[tf], width=18.0*cm, height=13.85*cm),
+                PageBreak(),
+            ])
+        else:
+            chart_flow.append(p(
+                f"Gráfico {tf}: NO DISPONIBLE — histórico insuficiente o no generado.",
+                "SQAlert",
+            ))
     story = [
         Spacer(1, .35*cm),
         p("SQAO · STEP INDEX QUANT RESEARCH", "SQTitle"),
@@ -673,11 +686,7 @@ def write_pdf(report: dict[str, Any], path: Path, chart_paths: dict[str, str] | 
         ], [1.5*cm,2.5*cm,2.5*cm,2.5*cm,2.5*cm,2.5*cm]),
         p("3. Gráficos técnicos MTF — estándar oficial SQAO", "SQH1"),
         p("Cada gráfico presenta velas OHLC cerradas, EMA 9/20/50, Bollinger(20,2), MACD(12,26,9), RSI(14), ATR(14) y ADX/+DI/-DI(14). Los indicadores son descriptivos y no constituyen confirmaciones estadísticamente independientes.", "SQBody"),
-        *([PageBreak()] + [item for tf in ("M1","M5","M15","H1","H4")
-          for item in ([p(f"Gráfico {tf} — fuente Deriv OHLC cerrada", "SQH2"),
-                        PDFImage(chart_paths[tf], width=18.0*cm, height=13.85*cm), PageBreak()]
-                       if chart_paths and tf in chart_paths else
-                       [p(f"Gráfico {tf}: NO DISPONIBLE — histórico insuficiente o no generado.", "SQAlert")])) ,
+        *chart_flow,
         p("4. Escenario de scalping actual (condicional; no es una orden)", "SQH1"),
         table([
             ["Estado","Dirección","Precio de referencia","Stop orientativo","Objetivo orientativo","R:R"],
