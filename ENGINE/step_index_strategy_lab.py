@@ -376,6 +376,22 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         ["Fecha/hora de señal histórica UTC", str((table18.get("historical_example_oos_trade") or {}).get("signal_time_utc", "N/D"))],
         ["Origen entrada / SL / TP", str((table18.get("historical_example_oos_trade") or {}).get("entry_source", "N/D")) + " / " + str((table18.get("historical_example_oos_trade") or {}).get("stop_target_source", "N/D"))],
     ]
+    audit = report.get("chart_indicator_audit", {})
+    score = audit.get("score", {})
+    t18_rows.extend([
+        ["Confluencia MTF LONG (puntos / máximo)", f"{score.get('long', 'N/D')} / {score.get('max_per_side', 'N/D')} ({score.get('long_pct', 0):.1f}%)"],
+        ["Confluencia MTF SHORT (puntos / máximo)", f"{score.get('short', 'N/D')} / {score.get('max_per_side', 'N/D')} ({score.get('short_pct', 0):.1f}%)"],
+        ["Sesgo de confluencia (no probabilidad)", str(score.get("decision", "N/D"))],
+        ["Método de puntuación", str(score.get("method", "N/D"))],
+    ])
+    for tf in ("H4", "H1", "M15", "M5", "M1"):
+        x = audit.get("timeframes", {}).get(tf, {})
+        t18_rows.append([f"Indicadores {tf}", "EMA9/20/50="+str(x.get("ema_stack","N/D"))+
+            "; RSI14="+str(x.get("rsi14","N/D"))+"; ATR14="+str(x.get("atr14","N/D"))+
+            "; MACD hist="+str(x.get("macd_histogram","N/D"))+
+            "; BB %B="+str(x.get("bollinger20_percent_b","N/D"))+
+            "; ADX/+DI/-DI="+str(x.get("adx14","N/D"))+"/"+str(x.get("plus_di14","N/D"))+"/"+str(x.get("minus_di14","N/D"))+
+            "; Stoch K/D="+str(x.get("stochastic9_k","N/D"))+"/"+str(x.get("stochastic9_d","N/D"))])
     t18 = Table(t18_rows, colWidths=[6*cm, 19*cm], repeatRows=1)
     t18.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
                              ("TEXTCOLOR",(0,0),(-1,0),colors.white),
@@ -494,7 +510,9 @@ def main() -> None:
         "statistics_status": "N/A — no OOS backtest for this exact detector rule and parameter set",
         "separate_best_observed_candidate": report.get("best_observed_candidate"),
         "separate_best_observed_metrics": metrics,
-        "price_source": "Deriv current M1 candle open with exact epoch match" if setup.get("execution_price_confirmed") else "No verified next-M1 open; no executable prices"
+        "price_source": "Deriv current M1 candle open with exact epoch match" if setup.get("execution_price_confirmed") else "No verified next-M1 open; no executable prices",
+        "indicator_confluence": report.get("chart_indicator_audit", {}).get("score"),
+        "indicator_timeframes": report.get("chart_indicator_audit", {}).get("timeframes")
     }
     # Table 18 is the strongest historical OOS candidate, separate from live-detector Table 17.
     # Dates are derived only from the actual OOS trades returned by the fixed-rule replay.
@@ -565,7 +583,10 @@ def main() -> None:
             "status": "CONDITIONAL_SCENARIO_ONLY" if best and best.get("gate", {}).get("eligible")
                       and setup.get("execution_price_confirmed") else "NOT_PUBLISHED_NO_TRADE",
             "visual_screenshots_used_as_price_source": False
-        }
+        },
+        "indicator_confluence": report.get("chart_indicator_audit", {}).get("score"),
+        "indicator_timeframes": report.get("chart_indicator_audit", {}).get("timeframes"),
+        "indicator_audit_note": "Unlabelled screenshot panes are NOT_IDENTIFIABLE and excluded; indicator values in this report are calculated from closed OHLC, not read from screenshot pixels."
     }
     out.mkdir(parents=True, exist_ok=True)
     json_path, pdf_path = out / "step_index_strategy_lab.json", out / "step_index_strategy_lab.pdf"
