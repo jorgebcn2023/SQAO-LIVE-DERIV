@@ -10,12 +10,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr\n      - run: python -m pip install -r ENGINE/requirements.txt -r API/requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: python -m pip install -r ENGINE/requirements.txt -r API/requirements.txt
       - run: python -m compileall -q API AI ENGINE CONNECTOR
       - run: python -m ENGINE.tests
       - run: python -m ENGINE.test_step_index_quant
       - run: python -m ENGINE.test_step_index_scalping_v23
-      - run: python -m ENGINE.test_step_index_scalping_v23_backtest\n      - run: python -m ENGINE.test_chart_visual_extraction
+      - run: python -m ENGINE.test_step_index_scalping_v23_backtest
+      - run: python -m ENGINE.test_chart_visual_extraction
       - run: python -m ENGINE.live_pipeline
       - name: Deriv public WebSocket smoke test
         run: |
