@@ -195,6 +195,116 @@ def build_report(frames: dict[str, list[dict[str, Any]]], symbol: dict[str, str]
                            "No order placement or live trading is implemented."]}
 
 
+def build_table18(report: dict[str, Any]) -> dict[str, Any]:
+    """Best observed OOS hit-rate candidate; historical stats never imply a live trade."""
+    best = next((x for x in report.get("strategies", [])
+                 if x.get("strategy") == report.get("best_observed_candidate")), None)
+    if not best:
+        return {"table": 18, "decision": "NO_TRADE", "status": "NO_EVALUABLE_CANDIDATE"}
+    metrics = best.get("oos_net") or {}
+    params = best.get("parameters") or {}
+    strategy = best.get("strategy")
+    rule = {
+        "rsi_reversal": {
+            "long": "RSI(14) de M5 cruza al alza 30: RSI previo <30 y RSI cerrado actual >=30",
+            "short": "RSI(14) de M5 cruza a la baja 70: RSI previo >70 y RSI cerrado actual <=70",
+            "filters": "Sin filtro M15/H1 en la regla evaluada; no añadir filtros nuevos sin rebacktest"
+        },
+        "breakout20_mtf": {
+            "long": "Cierre M5 supera el máximo de las 20 velas M5 cerradas previas y EMA10 > EMA20; M15/H1 alineados",
+            "short": "Cierre M5 rompe el mínimo de las 20 velas M5 cerradas previas y EMA10 < EMA20; M15/H1 alineados",
+            "filters": "Confirmación de tendencia M15 y H1 en la misma dirección"
+        },
+        "ema_pullback_mtf": {
+            "long": "EMA10 > EMA20; vela M5 previa cierra <= EMA10 y vela cerrada actual recupera por encima de EMA10; M15/H1 alineados",
+            "short": "EMA10 < EMA20; vela M5 previa cierra >= EMA10 y vela cerrada actual cae por debajo de EMA10; M15/H1 alineados",
+            "filters": "Confirmación de tendencia M15 y H1 en la misma dirección"
+        }
+    }.get(strategy, {})
+    lo = metrics.get("wilson_95_low")
+    hi = metrics.get("wilson_95_high")
+    eligible = bool(best.get("gate", {}).get("eligible"))
+    # This strategy lab has no live quote/trigger execution sheet for its top candidate.
+    # Negative expectancy or unverified costs must never be converted into an executable order.
+    blockers = []
+    if not eligible:
+        blockers.append("NO_SUPERA_FILTRO_ESTADISTICO_O_COSTES")
+    if metrics.get("expectancy_r") is None or metrics.get("expectancy_r", 0) <= 0:
+        blockers.append("EXPECTATIVA_OOS_NO_POSITIVA")
+    if report.get("oos_net_is_gross_proxy"):
+        blockers.append("COSTES_REALES_NO_CONFIGURADOS")
+    return {
+        "table": 18,
+        "instrument": "Step Index 100",
+        "symbol": report.get("symbol", {}).get("symbol", "stpRNG"),
+        "selection": "Mayor efectividad observada OOS entre las estrategias predefinidas; desempate por expectativa y PF",
+        "strategy": strategy,
+        "historical_oos": {
+            "trades": metrics.get("n"), "wins": metrics.get("wins"), "losses": metrics.get("losses"),
+            "hit_rate": metrics.get("win_rate"), "wilson_95": [lo, hi],
+            "expectancy_r": metrics.get("expectancy_r"), "profit_factor": metrics.get("profit_factor"),
+            "max_drawdown_r": metrics.get("max_drawdown_r"),
+            "performance_basis": report.get("performance_basis"),
+            "is_gross_proxy": bool(report.get("oos_net_is_gross_proxy"))
+        },
+        "parameters": {
+            "signal_timeframe": "M5", "rsi_period": 14 if strategy == "rsi_reversal" else None,
+            "long_trigger": rule.get("long"), "short_trigger": rule.get("short"),
+            "trend_filters": rule.get("filters"),
+            "entry": "Apertura de la siguiente vela M5 después del cierre confirmado de la señal",
+            "stop_loss": f"1.2 x ATR(14) M5 desde el precio real de entrada; debajo para LONG y encima para SHORT",
+            "take_profit": f"{params.get('target_R', 1.5)}R desde la entrada, en dirección de la operación",
+            "risk_reward": f"1:{params.get('target_R', 1.5)}",
+            "atr_multiplier": params.get("stop_ATR", 1.2),
+            "maximum_holding_period_m5_bars": params.get("horizon_m5", 5),
+            "round_trip_cost_price_units": params.get("round_trip_cost_price")
+        },
+        "live_execution": {
+            "decision": "CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION" if eligible else "NO_TRADE",
+            "direction": None, "entry_price": None, "stop_loss_price": None, "take_profit_price": None,
+            "activation_utc": None, "expiry_utc": None,
+            "status": "NO_LIVE_TRIGGER_OR_EXECUTABLE_NEXT_M5_QUOTE",
+            "position_size_lots": None,
+            "blockers": blockers or ["FALTA_CONFIRMACION_DE_TRIGGER_Y_COTIZACION_EJECUTABLE"]
+        },
+        "interpretation": "El porcentaje es la frecuencia histórica de aciertos de esta estrategia en la muestra OOS, no la probabilidad de la siguiente operación ni una garantía. Si la expectativa es negativa o faltan costes reales, NO_TRADE.",
+        "read_only": True
+    }
+
+
+def write_table18_pdf(table18: dict[str, Any], path: Path) -> None:
+    """Standalone execution sheet for the highest observed OOS hit-rate candidate."""
+    styles = getSampleStyleSheet()
+    rows = [["Campo", "Valor"]]
+    hist, params, live = (table18.get("historical_oos", {}), table18.get("parameters", {}),
+                          table18.get("live_execution", {}))
+    pct = lambda x: "N/D" if x is None else f"{100*float(x):.2f}%"
+    values = [
+        ("Estrategia", table18.get("strategy")), ("Aciertos OOS", f'{hist.get("wins","N/D")}/{hist.get("trades","N/D")}'),
+        ("Efectividad OOS", pct(hist.get("hit_rate"))),
+        ("IC Wilson 95%", pct((hist.get("wilson_95") or [None,None])[0]) + " – " + pct((hist.get("wilson_95") or [None,None])[1])),
+        ("Expectativa R", hist.get("expectancy_r")), ("Profit Factor", hist.get("profit_factor")),
+        ("Señal LONG", params.get("long_trigger")), ("Señal SHORT", params.get("short_trigger")),
+        ("Entrada", params.get("entry")), ("Stop Loss", params.get("stop_loss")),
+        ("Take Profit", params.get("take_profit")), ("R:R", params.get("risk_reward")),
+        ("Permanencia máxima", params.get("maximum_holding_period_m5_bars")),
+        ("Dirección actual", live.get("direction")), ("Precio de entrada actual", live.get("entry_price")),
+        ("SL/TP actuales", "NO DISPONIBLES: falta trigger y cotización ejecutable"),
+        ("Decisión", live.get("decision")), ("Bloqueos", ", ".join(live.get("blockers", []))),
+    ]
+    rows.extend([[str(k), "N/D" if v is None else str(v)] for k,v in values])
+    table = Table(rows, colWidths=[6*cm, 19*cm], repeatRows=1)
+    table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+                               ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                               ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                               ("FONTSIZE",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"TOP")]))
+    doc = SimpleDocTemplate(str(path), pagesize=landscape(A4), title="SQAO Table 18")
+    doc.build([Paragraph("SQAO — TABLA 18 · MEJOR EFECTIVIDAD OOS", styles["Title"]),
+               Paragraph("Step Index 100 · READ-ONLY · Parámetros de la estrategia mejor clasificada", styles["Normal"]),
+               Spacer(1, 12), table, Spacer(1, 12),
+               Paragraph(table18.get("interpretation", ""), styles["BodyText"])])
+
+
 def write_pdf(report: dict[str, Any], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     styles = getSampleStyleSheet()
@@ -271,6 +381,37 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                             ("FONTSIZE",(0,0),(-1,-1),8),
                             ("VALIGN",(0,0),(-1,-1),"TOP")]))
     story.extend([et, Spacer(1, 10)])
+    table18 = report.get("table_18", {})
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("TABLA 18 — MEJOR EFECTIVIDAD OOS OBSERVADA", styles["Heading2"]))
+    h = table18.get("historical_oos", {})
+    p = table18.get("parameters", {})
+    live = table18.get("live_execution", {})
+    pct = lambda x: "N/D" if x is None else f"{100*float(x):.2f}%"
+    t18_rows = [
+        ["Campo", "Resultado"],
+        ["Estrategia seleccionada", str(table18.get("strategy") or "N/D")],
+        ["Aciertos OOS", f'{h.get("wins", "N/D")} / {h.get("trades", "N/D")}'],
+        ["Efectividad OOS observada", pct(h.get("hit_rate"))],
+        ["IC Wilson 95%", pct((h.get("wilson_95") or [None,None])[0]) + " – " + pct((h.get("wilson_95") or [None,None])[1])],
+        ["Expectativa OOS (R)", str(h.get("expectancy_r", "N/D"))],
+        ["Profit Factor", str(h.get("profit_factor", "N/D"))],
+        ["Regla LONG", str(p.get("long_trigger") or "N/D")],
+        ["Regla SHORT", str(p.get("short_trigger") or "N/D")],
+        ["Entrada", str(p.get("entry") or "N/D")],
+        ["Stop Loss", str(p.get("stop_loss") or "N/D")],
+        ["Take Profit", str(p.get("take_profit") or "N/D")],
+        ["Máxima permanencia", str(p.get("maximum_holding_period_m5_bars", "N/D")) + " velas M5"],
+        ["Estado operativo", str(live.get("decision", "NO_TRADE"))],
+        ["Precios ejecutables", "NO DISPONIBLES — falta trigger y cotización M5 actual"],
+        ["Bloqueos", ", ".join(live.get("blockers", []))],
+    ]
+    t18 = Table(t18_rows, colWidths=[6*cm, 19*cm], repeatRows=1)
+    t18.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+                             ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                             ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                             ("FONTSIZE",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"TOP")]))
+    story.extend([t18, Paragraph(table18.get("interpretation", ""), styles["BodyText"])])
     table17 = report.get("table_17", {})
     story.append(Paragraph("TABLA 17 — OPERACIÓN SCALPING MEJOR CLASIFICADA", styles["Heading2"]))
     fmt_price = lambda x: "NO DISPONIBLE" if x is None else f"{float(x):.2f}"
@@ -403,7 +544,10 @@ def main() -> None:
             return [json_safe(v) for v in value]
         return value
     json_path.write_text(json.dumps(json_safe(report), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+    report["table_18"] = build_table18(report)
     write_pdf(report, pdf_path)
+    table18_pdf = out / "step_index_table18.pdf"
+    write_table18_pdf(report["table_18"], table18_pdf)
     print(json.dumps({"symbol": report["symbol"], "decision": report["decision"],
                       "strategies": [{"name": x["strategy"], "oos_n": x["oos_n"],
                                       "win_rate": x["oos_net"]["win_rate"],
