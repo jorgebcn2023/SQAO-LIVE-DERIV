@@ -149,17 +149,17 @@ def _macd(values: list[float]) -> dict[str, float | None]:
 
 
 def _stochastic(bars: list[dict[str, float]], period: int = 14) -> dict[str, float | None]:
-    if len(bars) < period + 2:
+    if len(bars) < period + 4:
         return {"stochastic14_k": None, "stochastic3_k": None, "stochastic3_d": None}
     raw_k = []
-    # Calculate a rolling %K series for the final three bars.
-    for end in range(len(bars) - 2, len(bars) + 1):
+    # Five consecutive fast-%K observations support three slow-%K values and a slow-%D.
+    for end in range(len(bars) - 4, len(bars) + 1):
         segment = bars[end - period:end]
         lo, hi = min(x["low"] for x in segment), max(x["high"] for x in segment)
         raw_k.append(50.0 if hi == lo else 100.0 * (bars[end - 1]["close"] - lo) / (hi - lo))
-    smooth_k = sum(raw_k) / 3.0
-    return {"stochastic14_k": raw_k[-1], "stochastic3_k": smooth_k,
-            "stochastic3_d": smooth_k}
+    slow_k_series = [sum(raw_k[i-2:i+1]) / 3.0 for i in range(2, len(raw_k))]
+    return {"stochastic14_k": raw_k[-1], "stochastic3_k": slow_k_series[-1],
+            "stochastic3_d": sum(slow_k_series[-3:]) / 3.0}
 
 
 def _vote(value: str | None) -> str:
