@@ -24,7 +24,7 @@ BASE_FIELDS = (
     "candidate_id", "sample", "direction", "signal_epoch", "entry_epoch",
     "entry", "stop_loss", "take_profit", "exit_epoch", "exit_price",
     "risk_price_units", "reward_price_units", "sl_distance_price_units",
-    "tp_distance_price_units", "risk_reward", "gross_r", "cost_r", "net_r",
+    "tp_distance_price_units", "risk_reward", "gross_r", "cost_r", "net_r", "recorded_net_r",
     "round_trip_cost_price_units", "exit_reason", "holding_bars",
 )
 
@@ -44,6 +44,15 @@ def _epoch_iso(epoch: Any) -> str | None:
         return None
     from datetime import datetime, timezone
     return datetime.fromtimestamp(int(epoch), tz=timezone.utc).isoformat()
+
+
+def _max_drawdown(values: list[float]) -> float:
+    equity = peak = drawdown = 0.0
+    for value in values:
+        equity += value
+        peak = max(peak, equity)
+        drawdown = max(drawdown, peak - equity)
+    return drawdown
 
 
 def build_table18(report: dict[str, Any]) -> dict[str, Any]:
@@ -79,7 +88,8 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
             "tp_distance_price_units": reward, "risk_reward": rr,
             "gross_r": _number(trade.get("gross_r"), "gross_r"),
             "cost_r": _number(trade.get("cost_r"), "cost_r"),
-            "net_r": _number(trade.get("net_r"), "net_r"),
+            "net_r": (_number(trade.get("net_r"), "net_r") if params.get("round_trip_cost_price") is not None else None),
+            "recorded_net_r": _number(trade.get("net_r"), "net_r"),
             "round_trip_cost_price_units": params.get("round_trip_cost_price"),
             "exit_reason": trade.get("exit_reason", "NOT_AVAILABLE"),
             "holding_bars": trade.get("holding_bars", "NOT_AVAILABLE"),
@@ -98,7 +108,9 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
 
     def summarize(sample: str) -> dict[str, Any]:
         selected = [r for r in rows if r["sample"] == sample]
-        rs = [r["net_r"] for r in selected]
+        gross = [r["gross_r"] for r in selected]
+        net = [r["net_r"] for r in selected] if params.get("round_trip_cost_price") is not None else None
+        rs = net if net is not None else gross
         wins = sum(x > 0 for x in rs)
         losses = sum(x < 0 for x in rs)
         gross_profit = sum(x for x in rs if x > 0)
@@ -122,9 +134,13 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
         return {
             "trades": n, "wins": wins, "losses": losses,
             "win_rate": wins/n if n else None, "wilson95": wilson,
-            "expectancy_net_r": sum(rs)/n if n else None,
-            "profit_factor_net": gross_profit/gross_loss if gross_loss else None,
-            "max_drawdown_net_r": max_dd, "total_net_r": sum(rs),
+            "expectancy_gross_r": sum(gross)/n if n else None,
+            "profit_factor_gross": (sum(x for x in gross if x > 0) / -sum(x for x in gross if x < 0)) if any(x < 0 for x in gross) else None,
+            "max_drawdown_gross_r": _max_drawdown(gross),
+            "expectancy_net_r": sum(net)/n if net is not None and n else None,
+            "profit_factor_net": gross_profit/gross_loss if net is not None and gross_loss else None,
+            "max_drawdown_net_r": max_dd if net is not None else None,
+            "total_net_r": sum(net) if net is not None else None,
             "costs_configured": params.get("round_trip_cost_price") is not None,
             "costs_verified": False,
         }
@@ -142,6 +158,7 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
         "row_count": len(rows),
         "summary": {sample: summarize(sample) for sample in ("train", "out_of_sample")},
         "rows": rows,
+        "costs_verified": False,
         "missing_data_policy": "Missing indicator values remain null/NOT_AVAILABLE; no imputation or pixel-derived execution prices.",
     }
 
