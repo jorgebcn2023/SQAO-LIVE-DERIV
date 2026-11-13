@@ -40,7 +40,7 @@ STEP_INDEX_MARKET_MECHANICS = {
     "source": "Deriv Academy — Step Indices evolution",
     "source_url": "https://traders-academy.deriv.com/es/trading-guides/step-indices-evolution-step",
 }
-DEFAULT_COUNTS = {"M1": 5000, "M5": 20000, "M15": 7000, "H1": 2500, "D1": 1000, "W1": 260}
+DEFAULT_COUNTS = {"M1": 5000, "M5": 20000, "M15": 7000, "H1": 2500, "H4": 1500, "D1": 1000, "W1": 260}
 
 
 def ema(values: list[float], period: int) -> float | None:
