@@ -397,7 +397,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
             "; MACD hist="+str(x.get("macd_histogram","N/D"))+
             "; BB %B="+str(x.get("bollinger20_percent_b","N/D"))+
             "; ADX/+DI/-DI="+str(x.get("adx14","N/D"))+"/"+str(x.get("plus_di14","N/D"))+"/"+str(x.get("minus_di14","N/D"))+
-            "; Stoch K/D="+str(x.get("stochastic9_k","N/D"))+"/"+str(x.get("stochastic9_d","N/D"))])
+            "; Stoch K/D="+str(x.get("stochastic3_k","N/D"))+"/"+str(x.get("stochastic3_d","N/D"))])
     t18 = Table(t18_rows, colWidths=[6*cm, 19*cm], repeatRows=1)
     t18.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
                              ("TEXTCOLOR",(0,0),(-1,0),colors.white),
@@ -409,7 +409,16 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     audit = report.get("chart_indicator_audit", {})
     score = audit.get("score", {})
     story.append(Spacer(1, 10))
-    story.append(Paragraph("AUDITORÍA INTEGRAL DE INDICADORES MTF — M1/M5/M15/H1/H4", styles["Heading2"]))
+    story.append(Paragraph("AUDITORÍA INTEGRAL DE INDICADORES MTF — V2.0.0 — M1/M5/M15/H1/H4", styles["Heading2"]))
+    story.append(Paragraph("Calidad de datos: " + " · ".join(
+        tf + ": " + str(audit.get("timeframes", {}).get(tf, {}).get("data_quality", {}).get("valid_rows", 0)) +
+        " velas válidas / " + str(audit.get("timeframes", {}).get(tf, {}).get("data_quality", {}).get("invalid_rows", 0)) +
+        " inválidas / " + str(audit.get("timeframes", {}).get(tf, {}).get("data_quality", {}).get("duplicate_epochs", 0)) +
+        " duplicadas" for tf in ("H4", "H1", "M15", "M5", "M1")), styles["BodyText"]))
+    story.append(Paragraph("Cobertura de indicadores: " + f"{score.get('coverage_pct', 0):.1f}%" +
+        " · Margen direccional: " + f"{score.get('directional_margin_pct', 0):.1f}%" +
+        " · Umbral cobertura: " + f"{score.get('min_coverage_pct', 0):.1f}%" +
+        " · Umbral margen: " + f"{score.get('min_directional_margin_pct', 0):.1f}%", styles["BodyText"]))
     story.append(Paragraph("Votos agrupados sin doble contabilización: tendencia EMA 9/20/50; momentum MACD(12,26,9); osciladores RSI(14)+Stochastic(9,3,3) en una sola familia; fuerza ADX(14)+DI. Bollinger(20,2) y ATR(14) son diagnósticos, no votos direccionales. Los paneles sin etiqueta se declaran no identificables.", styles["BodyText"]))
     story.append(Paragraph(f"Confluencia descriptiva: LONG {score.get('long','N/D')}/{score.get('max_per_side','N/D')} ({score.get('long_pct',0):.1f}%) · SHORT {score.get('short','N/D')}/{score.get('max_per_side','N/D')} ({score.get('short_pct',0):.1f}%) · {score.get('decision','N/D')}", styles["BodyText"]))
     audit_rows = [["TF","Cierre","EMA9","EMA20","EMA50","RSI14","ATR14","MACD hist","BB %B","ADX14","+DI","-DI","Stoch K/D","Voto L/S"]]
@@ -420,7 +429,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         audit_rows.append([tf,n(x.get("last_close")),n(x.get("ema9")),n(x.get("ema20")),n(x.get("ema50")),
             n(x.get("rsi14")),n(x.get("atr14")),n(x.get("macd_histogram")),n(x.get("bollinger20_percent_b")),
             n(x.get("adx14")),n(x.get("plus_di14")),n(x.get("minus_di14")),
-            n(x.get("stochastic9_k"))+"/"+n(x.get("stochastic9_d")),
+            n(x.get("stochastic3_k"))+"/"+n(x.get("stochastic3_d")),
             str(sum(1 for z in v.values() if z == "LONG"))+"/"+str(sum(1 for z in v.values() if z == "SHORT"))])
     audit_table = Table(audit_rows, repeatRows=1)
     audit_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
@@ -453,6 +462,13 @@ async def run() -> dict[str, Any]:
         raise ValueError("SQAO_STEP_ROUND_TRIP_COST_PRICE must be non-negative")
     report = build_report(frames, symbol, cost)
     report["chart_indicator_audit"] = build_mtf_audit(frames)
+    report["chart_indicator_audit"]["integration"] = {
+        "component": "SQAO Chart Indicator Audit",
+        "version": "2.0.0",
+        "input_policy": "closed OHLC only",
+        "execution_mode": "READ_ONLY",
+        "timeframes": ["H4", "H1", "M15", "M5", "M1"]
+    }
     return report
 
 
