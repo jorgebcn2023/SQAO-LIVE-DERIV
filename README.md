@@ -134,3 +134,12 @@ report = build_visual_audit({
     "M1": "charts/step_m1.png",
 }, output="DATA/chart_visual_audit.json")
 ```
+
+
+## SQAO V2.2 — Research reliability and checkpoints
+
+The Step Index quant workflow has bounded stage timeouts and separate diagnostic checkpoints. The baseline research job timeout is 90 minutes (70 minutes for OHLC research); Table 18 is audited as a separate stage. Baseline JSON/PDF and Table 18 JSON/CSV are uploaded independently even when a later stage fails. The consolidated report artifact is published only after all validations pass.
+
+Checkpoint artifacts preserve completed outputs for inspection and manual recovery. GitHub Actions reruns still restart from the beginning; automatic resume from a previous run's artifacts is not implemented. See `docs/SQAO_V22_RESEARCH_RELIABILITY.md`.
+
+The change does not relax the statistical acceptance gate or safety rules. Missing verified all-in costs or insufficient OOS evidence continue to produce `NO_TRADE`.
