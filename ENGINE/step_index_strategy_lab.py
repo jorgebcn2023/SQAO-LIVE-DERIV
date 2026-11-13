@@ -229,7 +229,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     story.extend([table, Spacer(1, 12)])
     best_name = report.get("best_observed_candidate")
     best = next((x for x in report["strategies"] if x["strategy"] == best_name), None)
-    story.append(Paragraph("TABLA 18 — RANKING HISTÓRICO OOS POR EFECTIVIDAD OBSERVADA (INCLUYE CANDIDATAS <70%)", styles["Heading2"]))
+    story.append(Paragraph("TABLA 18 — RANKING HISTÓRICO OOS POR EFECTIVIDAD OBSERVADA (INCLUYE CANDIDATAS INFERIORES AL 70%)", styles["Heading2"]))
     if best is None:
         story.append(Paragraph("No hay una candidata evaluable con los datos disponibles.", styles["BodyText"]))
     else:
