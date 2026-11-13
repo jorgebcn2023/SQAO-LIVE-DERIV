@@ -229,7 +229,7 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
     story.extend([table, Spacer(1, 12)])
     best_name = report.get("best_observed_candidate")
     best = next((x for x in report["strategies"] if x["strategy"] == best_name), None)
-    story.append(Paragraph("RANKING OOS POR EFECTIVIDAD OBSERVADA (SE MUESTRAN TODAS LAS CANDIDATAS, INCLUSO <70%)", styles["Heading2"]))
+    story.append(Paragraph("TABLA 18 — RANKING HISTÓRICO OOS POR EFECTIVIDAD OBSERVADA (INCLUYE CANDIDATAS <70%)", styles["Heading2"]))
     if best is None:
         story.append(Paragraph("No hay una candidata evaluable con los datos disponibles.", styles["BodyText"]))
     else:
@@ -309,6 +309,33 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
         Paragraph("El ranking ordena por efectividad OOS observada; expectativa, PF e intervalo de confianza permiten contextualizarla. La efectividad es una frecuencia histórica de la muestra, no una garantía ni la probabilidad de la próxima operación. Si no supera los filtros o faltan costes reales, la decisión sigue siendo NO_TRADE.",
                   styles["BodyText"]),
         Paragraph("Regla de seguridad: si no supera todos los filtros, no operar.", styles["Heading3"])])
+    table18 = report.get("table_18", {})
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("TABLA 18 — FICHA DE LA MEJOR CANDIDATA HISTÓRICA", styles["Heading2"]))
+    t18_rows = [
+        ["Campo", "Resultado"],
+        ["Estrategia", str(table18.get("strategy", "N/D"))],
+        ["Temporalidad / filtros", str(table18.get("timeframe", "M5 + filtros M15/H1"))],
+        ["Periodo OOS", str(table18.get("oos_period_utc", "N/D"))],
+        ["Operaciones OOS", str(table18.get("oos_trades", "N/D"))],
+        ["Ganadoras / perdedoras", f'{table18.get("wins", "N/D")} / {table18.get("losses", "N/D")}'],
+        ["Efectividad observada", pct(table18.get("win_rate"))],
+        ["IC Wilson 95%", f'{pct(table18.get("wilson_95_low"))}–{pct(table18.get("wilson_95_high"))}'],
+        ["Expectativa", num(table18.get("expectancy_r")) + " R/trade"],
+        ["Profit Factor", num(table18.get("profit_factor"))],
+        ["Drawdown máximo", num(table18.get("max_drawdown_r")) + " R"],
+        ["Base de métricas", str(table18.get("performance_basis", "N/D"))],
+        ["Puerta estadística 70%", str(table18.get("eligibility", "N/D"))],
+        ["Dictamen", str(table18.get("status", "N/D"))],
+    ]
+    t18 = Table(t18_rows, colWidths=[6*cm, 19*cm], repeatRows=1)
+    t18.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+                             ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+                             ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                             ("FONTSIZE",(0,0),(-1,-1),8),
+                             ("VALIGN",(0,0),(-1,-1),"TOP")]))
+    story.append(t18)
+    story.append(Paragraph("La efectividad es una frecuencia histórica OOS y no representa la probabilidad de la próxima operación. Si no se configuraron costes round-trip, los resultados son brutos y no pueden presentarse como netos.", styles["BodyText"]))
     doc.build(story)
 
 
@@ -392,6 +419,42 @@ def main() -> None:
         "separate_best_observed_metrics": metrics,
         "price_source": "Deriv current M1 candle open with exact epoch match" if setup.get("execution_price_confirmed") else "No verified next-M1 open; no executable prices"
     }
+    # Table 18 is the strongest historical OOS candidate, separate from live-detector Table 17.
+    # Dates are derived only from the actual OOS trades returned by the fixed-rule replay.
+    oos_trades = [t for t in (best.get("trades", []) if best else [])
+                  if t.get("sample") == "out_of_sample"]
+    first_epoch = min((int(t["signal_epoch"]) for t in oos_trades), default=None)
+    last_epoch = max((int(t["signal_epoch"]) for t in oos_trades), default=None)
+    period = "N/D"
+    if first_epoch is not None and last_epoch is not None:
+        period = (datetime.fromtimestamp(first_epoch, timezone.utc).isoformat() +
+                  " — " + datetime.fromtimestamp(last_epoch, timezone.utc).isoformat())
+    best_stats = best.get("oos_net", {}) if best else {}
+    best_params = best.get("parameters", {}) if best else {}
+    report["table_18"] = {
+        "purpose": "Best observed historical strategy from the predeclared Strategy Lab candidates; independent of live detector Table 17",
+        "ranking_basis": "OOS observed win rate descending; expectancy and profit factor as tie-breakers",
+        "strategy": best.get("strategy") if best else None,
+        "rank": best.get("rank_by_oos_win_rate") if best else None,
+        "timeframe": "M5 + closed-candle M15/H1 filters",
+        "parameters": best_params,
+        "oos_period_utc": period,
+        "oos_start_epoch": first_epoch,
+        "oos_end_epoch": last_epoch,
+        "oos_trades": best_stats.get("n"),
+        "wins": best_stats.get("wins"),
+        "losses": best_stats.get("losses"),
+        "win_rate": best_stats.get("win_rate"),
+        "wilson_95_low": best_stats.get("wilson_95_low"),
+        "wilson_95_high": best_stats.get("wilson_95_high"),
+        "expectancy_r": best_stats.get("expectancy_r"),
+        "profit_factor": best_stats.get("profit_factor"),
+        "max_drawdown_r": best_stats.get("max_drawdown_r"),
+        "performance_basis": report.get("performance_basis"),
+        "eligibility": "PASS" if best and best.get("gate", {}).get("eligible") else "FAIL — 70% gate not met or costs not verified",
+        "status": "CANDIDATA HISTÓRICA PARA REVISIÓN" if best else "SIN CANDIDATA EVALUABLE",
+        "not_a_live_signal": True
+    }
     out.mkdir(parents=True, exist_ok=True)
     json_path, pdf_path = out / "step_index_strategy_lab.json", out / "step_index_strategy_lab.pdf"
     def json_safe(value):
@@ -410,7 +473,7 @@ def main() -> None:
                                       "expectancy_r": x["oos_net"]["expectancy_r"],
                                       "profit_factor": x["oos_net"]["profit_factor"],
                                       "eligible": x["gate"]["eligible"]} for x in report["strategies"]],
-                      "pdf": str(pdf_path), "json": str(json_path)}, ensure_ascii=False, indent=2))
+                      "table_18": report.get("table_18"),\n                      "pdf": str(pdf_path), "json": str(json_path)}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
