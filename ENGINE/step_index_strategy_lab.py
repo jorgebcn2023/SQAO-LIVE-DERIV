@@ -543,8 +543,8 @@ def main() -> None:
         if isinstance(value, list):
             return [json_safe(v) for v in value]
         return value
-    json_path.write_text(json.dumps(json_safe(report), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     report["table_18"] = build_table18(report)
+    json_path.write_text(json.dumps(json_safe(report), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     write_pdf(report, pdf_path)
     table18_pdf = out / "step_index_table18.pdf"
     write_table18_pdf(report["table_18"], table18_pdf)
