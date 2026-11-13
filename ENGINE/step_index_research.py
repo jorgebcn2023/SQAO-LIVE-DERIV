@@ -217,8 +217,7 @@ def signal_m5(hist: list[dict[str, Any]]) -> str | None:
     if len(hist) < 30:
         return None
     c = [float(r["close"]) for r in hist]
-    fast, slow = ema(c, 10), ema(c, 20)
-    prior = hist[-21:-1]
+    fast, slow = ema(c, 10), ema(c, 20)    prior = hist[-21:-1]
     if fast is None or slow is None:
         return None
     if c[-1] > max(float(x["high"]) for x in prior) and fast > slow:
@@ -439,7 +438,6 @@ def _json_safe(obj: Any) -> Any:
         return "Infinity" if obj > 0 else "-Infinity" if obj < 0 else None
     return obj
 
-
 def _chart_series(rows: list[dict[str, Any]]) -> dict[str, list[float | None]]:
     """Build display-only EMA, Bollinger, MACD, RSI, ATR and ADX series from closed OHLC."""
     n = len(rows)
@@ -657,8 +655,7 @@ def write_pdf(report: dict[str, Any], path: Path, chart_paths: dict[str, str] | 
         p(f"Puerta estadística histórica: {gate['decision']} · setup M5 actual: {setup_state}", "SQBody"),
         p(gate_warning, "SQAlert"),
         p("1. Resultado ejecutivo", "SQH1"),
-        table([
-            [f"Indicadores OOS {metric_basis}","Resultado","Criterio"],
+        table([            [f"Indicadores OOS {metric_basis}","Resultado","Criterio"],
             ["Operaciones fuera de muestra",str(s["n"]),"≥ 100"],
             ["Tasa de acierto",pct(s["win_rate"]),"≥ 70% observado"],
             ["IC Wilson 95%",f"{pct(s['wilson_95_low'])} – {pct(s['wilson_95_high'])}","Límite inferior ≥ 70%"],
@@ -810,6 +807,7 @@ async def run_research() -> dict[str, Any]:
         "historical_eligibility": historical_gate,
         "methodology": "chronological 70/30 holdout; fixed parameters; no parameter optimization; entry at next M5 open; stop first on same-bar conflict; four descriptive chronological holdout subperiods",
         "data_counts": {tf: len(rows) for tf, rows in frames.items()},
+        "_frames": frames,  # Internal chart input; excluded from the JSON report.
         "limitations": ["A 70% target is not guaranteed.", "Out-of-sample history is not a prediction for the next trade.",
                         "The rule is a fixed baseline; results need independent rolling walk-forward confirmation.",
                         "Cost-adjusted eligibility is blocked unless realistic round-trip cost is provided.",
@@ -819,12 +817,13 @@ async def run_research() -> dict[str, Any]:
 
 def main() -> None:
     report = asyncio.run(run_research())
+    frames = report.pop("_frames")
     outdir = Path(os.getenv("SQAO_DATA_DIR", "DATA"))
     outdir.mkdir(parents=True, exist_ok=True)
     json_path = outdir / "step_index_quant_report.json"
     pdf_path = outdir / "step_index_quant_report.pdf"
-    json_path.write_text(json.dumps(_json_safe(report), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     chart_paths = generate_mtf_charts(frames, outdir)
+    json_path.write_text(json.dumps(_json_safe(report), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     report["chart_files"] = {tf: Path(path).name for tf, path in chart_paths.items()}
     write_pdf(report, pdf_path, chart_paths)
     print(json.dumps({
