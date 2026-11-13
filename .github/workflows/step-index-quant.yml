@@ -11,6 +11,10 @@ on:
     paths:
       - 'ENGINE/step_index_quant.py'
       - 'ENGINE/step_index_research.py'
+      - 'ENGINE/chart_indicator_audit.py'
+      - 'ENGINE/table18_full_audit.py'
+      - 'ENGINE/test_table18_full_audit.py'
+      - 'docs/TABLE18_COMPLETE_V21.md'
       - 'ENGINE/step_index_strategy_lab.py'
       - 'ENGINE/step_index_arima_mc.py'
       - 'ENGINE/test_step_index_quant.py'
