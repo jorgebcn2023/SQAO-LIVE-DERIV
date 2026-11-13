@@ -9,6 +9,8 @@ from typing import Iterable
 
 from openai import OpenAI
 
+from ENGINE.chart_visual_extraction import build_visual_audit
+
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6")
 
 SYSTEM_PROMPT = """You are the visual analysis and reconciliation layer of SQAO-LIVE-DERIV.
@@ -18,8 +20,7 @@ The quantitative snapshot is supplied by the SQAO backend and is the live-data s
 
 Rules:
 - Detect timeframe from the visible chart label first, then filename.
-- Never invent prices, indicators, levels, timestamps, volatility, ATR, spread, slippage, or other values.
-- Separate OBSERVED facts from INFERRED scenarios.
+- Never invent prices, indicators, levels, timestamps, volatility, ATR, spread, slippage, or other values.\n- Use the supplied OCR/geometry audit as an additional extraction channel; reconcile it with visual reading and flag OCR uncertainty.\n- Transcribe every legible numeric label, axis price, MACD readout, timeframe and timestamp from every uploaded chart.\n- Keep screenshot-derived values labelled VISUAL_OBSERVATION or VISUAL_ESTIMATE; do not call them OHLC or executable quotes.\n- For Table 18, output the full numeric schema for LONG and SHORT; use null/NOT_AVAILABLE for unreadable or unsupported fields, never omit columns or fabricate values.\n- Separate OBSERVED facts from INFERRED scenarios.
 - Check whether uploaded charts are synchronized. Flag missing, duplicated, stale, or contradictory timeframes.
 - Compare visual structure against quantitative direction, EMA, RSI, ATR and latest close when supplied.
 - Report quant/vision disagreement explicitly.
@@ -42,8 +43,7 @@ Required sections:
 10. INVALIDATION
 11. RISKS
 12. FINAL_DECISION
-13. MISSING_DATA
-"""
+13. MISSING_DATA\n14. SCREENSHOT_EXTRACTION_LEDGER\n15. TABLE_18_NUMERIC_LONG_SHORT\n"""
 
 
 def _data_uri(path: Path) -> str:
@@ -84,6 +84,8 @@ def analyze_images(
     client = OpenAI(api_key=key)
     snapshot_text = json.dumps(market_snapshot or {}, ensure_ascii=False, indent=2)[:50000]
     image_manifest = "\n".join(f"- {label}" for _, label in image_items)
+    visual_audit = build_visual_audit({label: path for path, label in image_items})
+    visual_audit_text = json.dumps(visual_audit, ensure_ascii=False, indent=2)[:50000]
     content = [{
         "type": "input_text",
         "text": (
@@ -91,7 +93,8 @@ def analyze_images(
             "Cross-check every available timeframe against the quantitative snapshot below. "
             "If a timeframe is missing, duplicated, unreadable, stale, or temporally inconsistent, state it explicitly.\n\n"
             f"Uploaded image manifest:\n{image_manifest}\n\n"
-            f"SQAO live quantitative snapshot:\n{snapshot_text}"
+            f"SQAO live quantitative snapshot:\n{snapshot_text}\n\n"
+            f"Automated screenshot OCR/geometry extraction (cross-check; may contain OCR errors):\n{visual_audit_text}"
         ),
     }]
     for path, label in image_items:
