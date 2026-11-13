@@ -20,6 +20,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from .step_index_quant import acceptance_gate, equity_stats
+from .chart_indicator_audit import build_mtf_audit
 from .step_index_research import (
     GRANULARITY, atr_series, closed_candles, discover_step_index, ema_series,
     fetch_candles, rsi, _trend_cache, _cached_trend_at, STEP_INDEX_MARKET_MECHANICS,
@@ -383,14 +384,41 @@ def write_pdf(report: dict[str, Any], path: Path) -> None:
                              ("VALIGN",(0,0),(-1,-1),"TOP")]))
     story.append(t18)
     story.append(Paragraph("La efectividad es una frecuencia histórica OOS y no representa la probabilidad de la próxima operación. Si no se configuraron costes round-trip, los resultados son brutos y no pueden presentarse como netos.", styles["BodyText"]))
+    audit = report.get("chart_indicator_audit", {})
+    score = audit.get("score", {})
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("AUDITORÍA INTEGRAL DE INDICADORES MTF — M1/M5/M15/H1/H4", styles["Heading2"]))
+    story.append(Paragraph("Votos agrupados sin doble contabilización: tendencia EMA 9/20/50; momentum MACD(12,26,9); osciladores RSI(14)+Stochastic(9,3,3) en una sola familia; fuerza ADX(14)+DI. Bollinger(20,2) y ATR(14) son diagnósticos, no votos direccionales. Los paneles sin etiqueta se declaran no identificables.", styles["BodyText"]))
+    story.append(Paragraph(f"Confluencia descriptiva: LONG {score.get('long','N/D')}/{score.get('max_per_side','N/D')} ({score.get('long_pct',0):.1f}%) · SHORT {score.get('short','N/D')}/{score.get('max_per_side','N/D')} ({score.get('short_pct',0):.1f}%) · {score.get('decision','N/D')}", styles["BodyText"]))
+    audit_rows = [["TF","Cierre","EMA9","EMA20","EMA50","RSI14","ATR14","MACD hist","BB %B","ADX14","+DI","-DI","Stoch K/D","Voto L/S"]]
+    for tf in ("H4", "H1", "M15", "M5", "M1"):
+        x = audit.get("timeframes", {}).get(tf, {})
+        v = x.get("group_votes", {})
+        n = lambda z: "N/D" if z is None else f"{float(z):.3f}"
+        audit_rows.append([tf,n(x.get("last_close")),n(x.get("ema9")),n(x.get("ema20")),n(x.get("ema50")),
+            n(x.get("rsi14")),n(x.get("atr14")),n(x.get("macd_histogram")),n(x.get("bollinger20_percent_b")),
+            n(x.get("adx14")),n(x.get("plus_di14")),n(x.get("minus_di14")),
+            n(x.get("stochastic9_k"))+"/"+n(x.get("stochastic9_d")),
+            str(sum(1 for z in v.values() if z == "LONG"))+"/"+str(sum(1 for z in v.values() if z == "SHORT"))])
+    audit_table = Table(audit_rows, repeatRows=1)
+    audit_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#243447")),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.35,colors.grey),
+        ("FONTSIZE",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    story.append(audit_table)
+    story.append(Paragraph("Puntuación por familias (orden: tendencia / MACD / RSI+Stochastic / ADX+DI): " + " · ".join(
+        tf+": "+"/".join(str(audit.get("confluence",{}).get(tf,{}).get(k,"N/D")) for k in ("long_groups","short_groups"))
+        for tf in ("H4","H1","M15","M5","M1")), styles["BodyText"]))
+    story.append(Paragraph("Los indicadores no visibles o sin nombre en las capturas no se adivinan ni se puntúan. La puntuación de confluencia no es una probabilidad calibrada ni una estadística OOS.", styles["BodyText"]))
     doc.build(story)
 
 
 async def run() -> dict[str, Any]:
     symbol = await discover_step_index()
-    counts = {"M5": int(os.getenv("SQAO_LAB_M5_CANDLES", "20000")),
+    counts = {"M1": int(os.getenv("SQAO_LAB_M1_CANDLES", "30000")),
+              "M5": int(os.getenv("SQAO_LAB_M5_CANDLES", "20000")),
               "M15": int(os.getenv("SQAO_LAB_M15_CANDLES", "7000")),
-              "H1": int(os.getenv("SQAO_LAB_H1_CANDLES", "2500"))}
+              "H1": int(os.getenv("SQAO_LAB_H1_CANDLES", "2500")),
+              "H4": int(os.getenv("SQAO_LAB_H4_CANDLES", "1000"))}
     frames = {}
     for tf, count in counts.items():
         rows = await fetch_candles(symbol["symbol"], tf, count)
@@ -401,7 +429,9 @@ async def run() -> dict[str, Any]:
     cost = float(raw_cost) if raw_cost else None
     if cost is not None and (not math.isfinite(cost) or cost < 0):
         raise ValueError("SQAO_STEP_ROUND_TRIP_COST_PRICE must be non-negative")
-    return build_report(frames, symbol, cost)
+    report = build_report(frames, symbol, cost)
+    report["chart_indicator_audit"] = build_mtf_audit(frames)
+    return report
 
 
 def main() -> None:
