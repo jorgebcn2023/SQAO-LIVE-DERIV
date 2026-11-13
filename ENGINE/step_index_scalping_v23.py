@@ -220,7 +220,17 @@ def detect(f, next_open=None):
     matched_open = match_next_m1_open(next_open, decision_epoch)
     executable=execution_levels(bias,matched_open["open"],vol) if matched_open else None
     return {"state":"TRIGGER_CONFIRMED_NEXT_M1_OPEN" if executable else "TRIGGER_CONFIRMED_WAIT_NEXT_M1_OPEN",
-            "confirmed":True,"direction":bias,"reference_close":cur["close"],
+            "confirmed":True,"direction":bias,
+            "timeframe_confirmations":{
+                "H4":{"role":"context","trend_ema10_20":h4,"aligned":h4==bias},
+                "H1":{"role":"context","trend_ema10_20":bias,"aligned":True},
+                "M15":{"role":"structure","trend_ema10_20":mid,"aligned":mid==bias},
+                "M5":{"role":"setup","trend_ema10_20":direction(f["M5"][-100:]),"aligned":direction(f["M5"][-100:])==bias,
+                      "condition":"EMA10-20 pullback and rejection confirmed"},
+                "M1":{"role":"trigger","trend_ema10_20":direction(f["M1"][-100:]),"aligned":direction(f["M1"][-100:])==bias,
+                      "condition":"closed-candle breakout and EMA9/RSI trigger confirmed"}
+            },
+            "reference_close":cur["close"],
             "reference_levels":reference,"execution_levels":executable,
             "entry_price":executable["entry"] if executable else None,
             "stop_loss":executable["stop_loss"] if executable else None,
