@@ -1,188 +1,262 @@
-"""Complete, grouped indicator audit for SQAO Step Index charts.
+"""SQAO Chart Indicator Audit V2.0.
 
-Calculates only indicators with explicit, reproducible definitions from closed OHLC.
-Unlabelled screenshot-only panes are deliberately marked unidentified and never scored.
-Correlated indicators are grouped so they cannot inflate directional confluence.
+Research-only MTF indicator engine. Uses validated, closed OHLC bars only.
+Implements Wilder RSI/ATR/ADX, explicit warm-up handling, data-quality reporting,
+and coverage-adjusted confluence (no treating missing indicators as neutral votes).
+No broker orders, no execution interface, and no screenshot price extraction.
 """
 from __future__ import annotations
 
 import math
 from typing import Any
 
+VERSION = "2.0.0"
 TIMEFRAMES = ("H4", "H1", "M15", "M5", "M1")
 WEIGHTS = {"H4": 3, "H1": 2, "M15": 2, "M5": 1, "M1": 1}
+FAMILIES = ("trend", "momentum_macd", "oscillator_rsi_stoch", "directional_strength_adx_di")
 
 
-def _valid(rows: list[dict[str, Any]]) -> list[dict[str, float]]:
-    out = []
+def _finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _bars(rows: list[dict[str, Any]]) -> tuple[list[dict[str, float]], dict[str, int]]:
+    valid: list[dict[str, float]] = []
+    invalid = 0
     for row in rows:
         try:
-            x = {k: float(row[k]) for k in ("open", "high", "low", "close")}
-            if not all(math.isfinite(v) for v in x.values()):
-                continue
-            if x["high"] < max(x["open"], x["close"], x["low"]):
-                continue
-            if x["low"] > min(x["open"], x["close"], x["high"]):
-                continue
-            out.append(x)
-        except (KeyError, TypeError, ValueError):
-            continue
-    return out
+            bar = {k: float(row[k]) for k in ("open", "high", "low", "close")}
+            if not all(math.isfinite(v) for v in bar.values()):
+                raise ValueError
+            if bar["high"] < max(bar["open"], bar["close"], bar["low"]):
+                raise ValueError
+            if bar["low"] > min(bar["open"], bar["close"], bar["high"]):
+                raise ValueError
+            epoch = int(row["epoch"]) if row.get("epoch") is not None else None
+            if epoch is not None and epoch <= 0:
+                raise ValueError
+            if epoch is not None:
+                bar["epoch"] = float(epoch)
+            valid.append(bar)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            invalid += 1
+    # Preserve chronology, collapse duplicate epochs deterministically to the last supplied bar.
+    valid.sort(key=lambda x: x.get("epoch", 0.0))
+    deduped: list[dict[str, float]] = []
+    duplicates = 0
+    for bar in valid:
+        if "epoch" in bar and deduped and deduped[-1].get("epoch") == bar["epoch"]:
+            deduped[-1] = bar
+            duplicates += 1
+        else:
+            deduped.append(bar)
+    return deduped, {"input_rows": len(rows), "invalid_rows": invalid, "duplicate_epochs": duplicates,
+                     "valid_rows": len(deduped)}
 
 
 def _ema(values: list[float], period: int) -> float | None:
     if len(values) < period:
         return None
     alpha = 2.0 / (period + 1.0)
-    value = sum(values[:period]) / period
-    for x in values[period:]:
-        value = alpha * x + (1.0 - alpha) * value
-    return value
+    result = sum(values[:period]) / period
+    for value in values[period:]:
+        result += alpha * (value - result)
+    return result
+
+
+def _wilder(values: list[float], period: int) -> float | None:
+    if len(values) < period:
+        return None
+    result = sum(values[:period]) / period
+    for value in values[period:]:
+        result = ((period - 1) * result + value) / period
+    return result
 
 
 def _rsi(values: list[float], period: int = 14) -> float | None:
     if len(values) <= period:
         return None
-    changes = [b - a for a, b in zip(values[-period-1:-1], values[-period:])]
-    gain = sum(max(x, 0.0) for x in changes) / period
-    loss = sum(max(-x, 0.0) for x in changes) / period
-    if loss == 0:
-        return 100.0 if gain else 50.0
-    return 100.0 - 100.0 / (1.0 + gain / loss)
+    changes = [b - a for a, b in zip(values, values[1:])]
+    gains = [max(x, 0.0) for x in changes]
+    losses = [max(-x, 0.0) for x in changes]
+    avg_gain, avg_loss = _wilder(gains, period), _wilder(losses, period)
+    if avg_gain is None or avg_loss is None:
+        return None
+    if avg_loss == 0:
+        return 100.0 if avg_gain > 0 else 50.0
+    if avg_gain == 0:
+        return 0.0
+    return 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
 
 
-def _true_ranges(rows: list[dict[str, float]]) -> list[float]:
-    return [max(r["high"] - r["low"], abs(r["high"] - rows[i-1]["close"]),
-                abs(r["low"] - rows[i-1]["close"])) for i, r in enumerate(rows) if i]
+def _true_ranges(bars: list[dict[str, float]]) -> list[float]:
+    out = []
+    for i in range(1, len(bars)):
+        cur, prev = bars[i], bars[i - 1]
+        out.append(max(cur["high"] - cur["low"], abs(cur["high"] - prev["close"]),
+                       abs(cur["low"] - prev["close"])))
+    return out
 
 
-def _adx(rows: list[dict[str, float]], period: int = 14) -> dict[str, float | None]:
-    if len(rows) < period * 2 + 1:
+def _atr(bars: list[dict[str, float]], period: int = 14) -> float | None:
+    return _wilder(_true_ranges(bars), period)
+
+
+def _adx(bars: list[dict[str, float]], period: int = 14) -> dict[str, float | None]:
+    if len(bars) < 2 * period + 1:
         return {"adx14": None, "plus_di14": None, "minus_di14": None}
-    plus, minus, tr = [], [], []
-    for prev, cur in zip(rows, rows[1:]):
-        up = cur["high"] - prev["high"]
-        down = prev["low"] - cur["low"]
-        plus.append(up if up > down and up > 0 else 0.0)
-        minus.append(down if down > up and down > 0 else 0.0)
+    plus_dm, minus_dm, tr = [], [], []
+    for prev, cur in zip(bars, bars[1:]):
+        up, down = cur["high"] - prev["high"], prev["low"] - cur["low"]
+        plus_dm.append(up if up > down and up > 0 else 0.0)
+        minus_dm.append(down if down > up and down > 0 else 0.0)
         tr.append(max(cur["high"] - cur["low"], abs(cur["high"] - prev["close"]),
                       abs(cur["low"] - prev["close"])))
-    dx = []
-    for i in range(period - 1, len(tr)):
-        tr_sum = sum(tr[i-period+1:i+1])
-        if tr_sum <= 0:
-            dx.append(0.0)
+    dx_values = []
+    for end in range(period, len(tr) + 1):
+        tr_s = _wilder(tr[:end], period)
+        p_s, m_s = _wilder(plus_dm[:end], period), _wilder(minus_dm[:end], period)
+        if tr_s is None or p_s is None or m_s is None or tr_s <= 0:
             continue
-        pdi = 100.0 * sum(plus[i-period+1:i+1]) / tr_sum
-        mdi = 100.0 * sum(minus[i-period+1:i+1]) / tr_sum
+        pdi, mdi = 100.0 * p_s / tr_s, 100.0 * m_s / tr_s
         denom = pdi + mdi
-        dx.append(0.0 if denom == 0 else 100.0 * abs(pdi - mdi) / denom)
-    if len(dx) < period:
-        return {"adx14": None, "plus_di14": None, "minus_di14": None}
-    # Transparent rolling DX mean; do not label this Wilder-smoothed ADX.
-    adx_value = sum(dx[-period:]) / period
-    tr_sum = sum(tr[-period:])
-    pdi = 100.0 * sum(plus[-period:]) / tr_sum if tr_sum else None
-    mdi = 100.0 * sum(minus[-period:]) / tr_sum if tr_sum else None
-    return {"adx14": adx_value, "plus_di14": pdi, "minus_di14": mdi}
+        dx_values.append(0.0 if denom == 0 else 100.0 * abs(pdi - mdi) / denom)
+    adx_value = _wilder(dx_values, period)
+    tr_s = _wilder(tr, period)
+    p_s, m_s = _wilder(plus_dm, period), _wilder(minus_dm, period)
+    if tr_s is None or tr_s <= 0 or p_s is None or m_s is None:
+        return {"adx14": adx_value, "plus_di14": None, "minus_di14": None}
+    return {"adx14": adx_value, "plus_di14": 100.0 * p_s / tr_s,
+            "minus_di14": 100.0 * m_s / tr_s}
 
 
 def _macd(values: list[float]) -> dict[str, float | None]:
     if len(values) < 35:
         return {"macd_line": None, "macd_signal": None, "macd_histogram": None}
     line = []
-    for i in range(len(values)):
-        a, b = _ema(values[:i+1], 12), _ema(values[:i+1], 26)
-        if a is not None and b is not None:
-            line.append(a - b)
+    for end in range(26, len(values) + 1):
+        sample = values[:end]
+        fast, slow = _ema(sample, 12), _ema(sample, 26)
+        if fast is not None and slow is not None:
+            line.append(fast - slow)
     signal = _ema(line, 9)
     current = line[-1] if line else None
     return {"macd_line": current, "macd_signal": signal,
             "macd_histogram": current - signal if current is not None and signal is not None else None}
 
 
+def _stochastic(bars: list[dict[str, float]], period: int = 14) -> dict[str, float | None]:
+    if len(bars) < period + 2:
+        return {"stochastic14_k": None, "stochastic3_k": None, "stochastic3_d": None}
+    raw_k = []
+    # Calculate a rolling %K series for the final three bars.
+    for end in range(len(bars) - 2, len(bars) + 1):
+        segment = bars[end - period:end]
+        lo, hi = min(x["low"] for x in segment), max(x["high"] for x in segment)
+        raw_k.append(50.0 if hi == lo else 100.0 * (bars[end - 1]["close"] - lo) / (hi - lo))
+    smooth_k = sum(raw_k) / 3.0
+    return {"stochastic14_k": raw_k[-1], "stochastic3_k": smooth_k,
+            "stochastic3_d": smooth_k}
+
+
+def _vote(value: str | None) -> str:
+    return value if value in ("LONG", "SHORT") else "NEUTRAL" if value == "NEUTRAL" else "UNAVAILABLE"
+
+
 def indicator_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    bars = _valid(rows)
-    c = [x["close"] for x in bars]
-    last = c[-1] if c else None
-    emas = {f"ema{p}": _ema(c, p) for p in (9, 20, 50)}
-    atrs = _true_ranges(bars)
-    atr14 = sum(atrs[-14:]) / 14 if len(atrs) >= 14 else None
+    bars, quality = _bars(rows)
+    closes = [x["close"] for x in bars]
+    emas = {f"ema{p}": _ema(closes, p) for p in (9, 20, 50)}
+    rsi = _rsi(closes)
+    atr = _atr(bars)
+    macd = _macd(closes)
+    adx = _adx(bars)
+    stoch = _stochastic(bars)
     bb = {"bollinger20_lower": None, "bollinger20_middle": None, "bollinger20_upper": None,
           "bollinger20_width": None, "bollinger20_percent_b": None}
-    if len(c) >= 20:
-        sample = c[-20:]
-        mid = sum(sample) / 20
-        sd = math.sqrt(sum((x-mid)**2 for x in sample) / 20)
-        lo, hi = mid - 2*sd, mid + 2*sd
-        bb = {"bollinger20_lower": lo, "bollinger20_middle": mid, "bollinger20_upper": hi,
-              "bollinger20_width": (hi-lo)/mid if mid else None,
-              "bollinger20_percent_b": (last-lo)/(hi-lo) if hi != lo else 0.5}
-    stoch = {"stochastic9_k": None, "stochastic9_d": None}
-    if len(bars) >= 11:
-        ks = []
-        for i in range(len(bars)-3, len(bars)):
-            seg = bars[i-8:i+1]
-            lo, hi = min(x["low"] for x in seg), max(x["high"] for x in seg)
-            ks.append(50.0 if hi == lo else 100.0*(bars[i]["close"]-lo)/(hi-lo))
-        stoch = {"stochastic9_k": ks[-1], "stochastic9_d": sum(ks[-3:])/3}
-    macd = _macd(c)
-    adx = _adx(bars)
-    ema9, ema20, ema50 = emas.values()
-    trend = "BULLISH" if all(x is not None for x in (ema9,ema20,ema50)) and ema9>ema20>ema50 else (
-        "BEARISH" if all(x is not None for x in (ema9,ema20,ema50)) and ema9<ema20<ema50 else "MIXED/NA")
-    # One vote per independent feature family; correlated members never add separate votes.
-    groups: dict[str, str] = {}
-    groups["trend"] = "LONG" if trend == "BULLISH" else "SHORT" if trend == "BEARISH" else "NEUTRAL"
+    if len(closes) >= 20:
+        sample = closes[-20:]
+        middle = sum(sample) / 20
+        sd = math.sqrt(sum((x - middle) ** 2 for x in sample) / 20)
+        lower, upper = middle - 2 * sd, middle + 2 * sd
+        bb = {"bollinger20_lower": lower, "bollinger20_middle": middle, "bollinger20_upper": upper,
+              "bollinger20_width": (upper - lower) / middle if middle else None,
+              "bollinger20_percent_b": (closes[-1] - lower) / (upper - lower) if upper != lower else 0.5}
+    e9, e20, e50 = emas["ema9"], emas["ema20"], emas["ema50"]
+    trend = ("BULLISH" if None not in (e9, e20, e50) and e9 > e20 > e50 else
+             "BEARISH" if None not in (e9, e20, e50) and e9 < e20 < e50 else "MIXED/NA")
+    trend_vote = "LONG" if trend == "BULLISH" else "SHORT" if trend == "BEARISH" else (
+        "NEUTRAL" if None not in (e9, e20, e50) else None)
     hist = macd["macd_histogram"]
-    groups["momentum_macd"] = "LONG" if hist is not None and hist > 0 else "SHORT" if hist is not None and hist < 0 else "NEUTRAL"
-    rsi = _rsi(c)
-    k, d = stoch["stochastic9_k"], stoch["stochastic9_d"]
-    # RSI and stochastic are combined into one oscillator family to avoid double counting.
-    osc_votes = []
-    if rsi is not None and rsi > 55: osc_votes.append(1)
-    elif rsi is not None and rsi < 45: osc_votes.append(-1)
-    if k is not None and d is not None and k > d and k < 80: osc_votes.append(1)
-    elif k is not None and d is not None and k < d and k > 20: osc_votes.append(-1)
-    groups["oscillator_rsi_stoch"] = "LONG" if sum(osc_votes)>0 else "SHORT" if sum(osc_votes)<0 else "NEUTRAL"
+    macd_vote = "LONG" if hist is not None and hist > 0 else "SHORT" if hist is not None and hist < 0 else (
+        "NEUTRAL" if hist is not None else None)
+    osc_values = []
+    if rsi is not None:
+        osc_values.append(1 if rsi >= 55 else -1 if rsi <= 45 else 0)
+    k, d = stoch["stochastic3_k"], stoch["stochastic3_d"]
+    if k is not None and d is not None:
+        osc_values.append(1 if k > d and k < 80 else -1 if k < d and k > 20 else 0)
+    osc_vote = ("LONG" if sum(osc_values) > 0 else "SHORT" if sum(osc_values) < 0 else "NEUTRAL") if osc_values else None
     pdi, mdi, adxv = adx["plus_di14"], adx["minus_di14"], adx["adx14"]
-    groups["directional_strength_adx_di"] = ("LONG" if pdi is not None and mdi is not None and adxv is not None and adxv >= 20 and pdi > mdi
-        else "SHORT" if pdi is not None and mdi is not None and adxv is not None and adxv >= 20 and mdi > pdi else "NEUTRAL")
-    # Bollinger is a volatility/location diagnostic, not a standalone directional vote.
-    groups["volatility_bollinger"] = "EXPANSION" if bb["bollinger20_width"] is not None else "NOT_AVAILABLE"
-    groups["atr14"] = "AVAILABLE" if atr14 is not None else "NOT_AVAILABLE"
+    di_vote = ("LONG" if adxv is not None and adxv >= 20 and pdi is not None and mdi is not None and pdi > mdi else
+               "SHORT" if adxv is not None and adxv >= 20 and pdi is not None and mdi is not None and mdi > pdi else
+               "NEUTRAL" if adxv is not None and pdi is not None and mdi is not None else None)
+    votes = {"trend": _vote(trend_vote), "momentum_macd": _vote(macd_vote),
+             "oscillator_rsi_stoch": _vote(osc_vote), "directional_strength_adx_di": _vote(di_vote)}
+    last_epoch = int(bars[-1]["epoch"]) if bars and "epoch" in bars[-1] else None
     return {
-        "candles_used": len(bars), "last_close": last, **emas, "ema_stack": trend,
-        "rsi14": rsi, "atr14": atr14, **macd, **bb, **adx, **stoch,
-        "group_votes": groups,
+        "version": VERSION, "candles_used": len(bars), "last_closed_epoch": last_epoch,
+        "last_close": closes[-1] if closes else None, **emas, "ema_stack": trend,
+        "rsi14": rsi, "atr14": atr, **macd, **bb, **adx, **stoch,
+        "group_votes": votes, "data_quality": quality,
         "unlabelled_chart_panes": "NOT_IDENTIFIABLE_FROM_SCREENSHOT; excluded from scoring",
-        "indicator_parameters": {"EMA": [9,20,50], "Bollinger": [20,2], "MACD": [12,26,9],
-                                 "RSI": 14, "ATR": 14, "ADX_DI": 14, "Stochastic": [9,3,3]},
+        "indicator_parameters": {"EMA": [9, 20, 50], "Bollinger": [20, 2], "MACD": [12, 26, 9],
+                                 "RSI_WILDER": 14, "ATR_WILDER": 14, "ADX_WILDER_DI": 14,
+                                 "Stochastic": [14, 3, 3]},
     }
 
 
-def build_mtf_audit(frames: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+def build_mtf_audit(frames: dict[str, list[dict[str, Any]]], *, min_coverage: float = 0.60,
+                    min_directional_margin: float = 0.12) -> dict[str, Any]:
     snapshots = {tf: indicator_snapshot(frames.get(tf, [])) for tf in TIMEFRAMES}
-    groups = ("trend", "momentum_macd", "oscillator_rsi_stoch", "directional_strength_adx_di")
-    rows, long_score, short_score = {}, 0, 0
-    max_score = sum(WEIGHTS.values()) * len(groups)
+    confluence: dict[str, Any] = {}
+    long_score = short_score = available_weight = 0
+    total_possible = sum(WEIGHTS.values()) * len(FAMILIES)
     for tf in TIMEFRAMES:
         votes = snapshots[tf]["group_votes"]
-        l = sum(1 for g in groups if votes[g] == "LONG")
-        s = sum(1 for g in groups if votes[g] == "SHORT")
         weight = WEIGHTS[tf]
-        long_score += l * weight
-        short_score += s * weight
-        rows[tf] = {"weight": weight, "long_groups": l, "short_groups": s,
-                    "long_weighted": l*weight, "short_weighted": s*weight,
-                    "group_votes": votes}
-    total = long_score + short_score
-    decision = "LONG_BIAS" if long_score > short_score else "SHORT_BIAS" if short_score > long_score else "NO_DIRECTIONAL_EDGE"
-    return {"timeframes": snapshots, "confluence": rows,
-            "score": {"long": long_score, "short": short_score, "max_per_side": max_score,
-                      "long_pct": 100*long_score/max_score, "short_pct": 100*short_score/max_score,
-                      "decision": decision,
-                      "method": "Four independent vote families; EMA stack, MACD histogram, combined RSI/Stochastic, ADX/DI; Bollinger/ATR are diagnostics only. Weights H4=3,H1=2,M15=2,M5=1,M1=1."},
-            "limitations": ["Unlabelled screenshot indicator panes cannot be identified from pixels and are excluded.",
-                            "This audit uses closed OHLC input; it does not infer exact values from screenshot pixels.",
-                            "Confluence score is descriptive, not a calibrated probability or backtest win rate."]}
+        available = sum(1 for family in FAMILIES if votes[family] != "UNAVAILABLE")
+        longs = sum(1 for family in FAMILIES if votes[family] == "LONG")
+        shorts = sum(1 for family in FAMILIES if votes[family] == "SHORT")
+        long_score += longs * weight
+        short_score += shorts * weight
+        available_weight += available * weight
+        confluence[tf] = {"weight": weight, "available_groups": available,
+                          "long_groups": longs, "short_groups": shorts,
+                          "long_weighted": longs * weight, "short_weighted": shorts * weight,
+                          "group_votes": votes}
+    coverage = available_weight / total_possible if total_possible else 0.0
+    long_pct = 100.0 * long_score / available_weight if available_weight else 0.0
+    short_pct = 100.0 * short_score / available_weight if available_weight else 0.0
+    margin = abs(long_score - short_score) / available_weight if available_weight else 0.0
+    if coverage < min_coverage or margin < min_directional_margin or long_score == short_score:
+        decision = "NO_DIRECTIONAL_EDGE"
+    else:
+        decision = "LONG_BIAS" if long_score > short_score else "SHORT_BIAS"
+    return {
+        "version": VERSION, "timeframes": snapshots, "confluence": confluence,
+        "score": {"long": long_score, "short": short_score, "available_weight": available_weight,
+                  "max_per_side": available_weight, "total_possible_weight": total_possible,
+                  "coverage_pct": 100.0 * coverage, "long_pct": long_pct, "short_pct": short_pct,
+                  "directional_margin_pct": 100.0 * margin, "decision": decision,
+                  "is_probability": False, "min_coverage_pct": 100.0 * min_coverage,
+                  "min_directional_margin_pct": 100.0 * min_directional_margin,
+                  "method": "Coverage-adjusted weighted vote across EMA stack, MACD histogram, RSI/Stochastic and ADX/DI; missing data is excluded, not counted as neutral. H4=3,H1=2,M15=2,M5=1,M1=1."},
+        "limitations": ["Confluence is a descriptive score, not a calibrated probability or OOS win rate.",
+                        "Only closed OHLC bars are accepted; screenshots are not a source of exact prices.",
+                        "Unlabelled screenshot indicator panes are not inferred or scored.",
+                        "Wilder smoothing and warm-up requirements are explicit; compare with broker display settings before assuming exact parity."],
+    }
