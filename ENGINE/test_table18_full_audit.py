@@ -28,9 +28,10 @@ def test_table18_has_numeric_levels_and_complete_mtf_context():
     assert row["stop_loss"] == 7307.0
     assert row["take_profit"] == 7304.5
     assert row["risk_reward"] == 1.5
-    assert row["latest_h4_rsi14"] == 44.2
-    assert row["latest_m1_macd_histogram"] == -0.2
-    assert row["indicator_provenance"] == "LATEST_REPORT_CONTEXT_NOT_HISTORICAL_AT_ENTRY"
+    assert row["signal_h4_rsi14"] is None
+    assert row["signal_m1_macd_histogram"] is None
+    assert row["indicator_provenance"] == "MISSING_HISTORICAL_AT_SIGNAL"
+    assert table["indicator_provenance_counts"]["MISSING_HISTORICAL_AT_SIGNAL"] == 1
     assert table["summary"]["out_of_sample"]["trades"] == 1
 
 
@@ -38,7 +39,7 @@ def test_missing_indicators_remain_null_and_invalid_geometry_rejected():
     report = sample_report()
     report["indicators"]["H4"] = {}
     table = build_table18(report)
-    assert table["rows"][0]["latest_h4_rsi14"] is None
+    assert table["rows"][0]["signal_h4_rsi14"] is None
     report["backtest"]["trades"][0]["stop"] = 7305.0
     try:
         build_table18(report)
@@ -61,18 +62,49 @@ def test_historical_indicator_values_are_attached_to_signal_timestamp():
             "ema_stack": "BEARISH",
             "group_votes": {"trend":"SHORT","momentum_macd":"SHORT",
                             "oscillator_rsi_stoch":"SHORT","directional_strength_adx_di":"SHORT"}}
+    seconds = {"D1":86400, "H4":14400, "H1":3600, "M15":900, "M5":300, "M1":60}
     report["backtest"]["trades"][0]["indicator_snapshots_at_signal"] = {
-        tf: hist for tf in ("D1","H4","H1","M15","M5","M1")}
-    row = build_table18(report)["rows"][0]
+        tf: {**hist, "last_closed_epoch": 1700000000 - seconds[tf]}
+        for tf in ("D1","H4","H1","M15","M5","M1")}
+    result = build_table18(report)
+    row = result["rows"][0]
     assert row["indicator_provenance"] == "HISTORICAL_AT_SIGNAL"
     assert row["signal_h4_ema9"] == 7305.8
     assert row["signal_m15_adx14"] == 24.0
     assert row["signal_m1_minus_di14"] == 28.0
     assert row["signal_h1_macd_vote"] == "SHORT"
+    assert row["signal_d1_candle_close_epoch"] <= row["signal_epoch"]
+    assert result["indicator_provenance_counts"]["HISTORICAL_AT_SIGNAL"] == 1
+
+
+def test_future_indicator_snapshot_is_rejected():
+    report = sample_report()
+    future = {"candles_used": 50, "last_closed_epoch": 1700000000,
+              "ema9": 7305.8, "ema20": 7306.2}
+    report["backtest"]["trades"][0]["indicator_snapshots_at_signal"] = {"M1": future}
+    try:
+        build_table18(report)
+    except ValueError as exc:
+        assert "look-ahead contamination" in str(exc)
+    else:
+        raise AssertionError("Future M1 indicator candle must be rejected")
+
+
+def test_partial_historical_snapshots_never_fall_back_to_latest_context():
+    report = sample_report()
+    report["backtest"]["trades"][0]["indicator_snapshots_at_signal"] = {
+        "M1": {"last_closed_epoch": 1699999940, "rsi14": 48.0}
+    }
+    row = build_table18(report)["rows"][0]
+    assert row["indicator_provenance"] == "PARTIAL_HISTORICAL_AT_SIGNAL"
+    assert row["signal_m1_rsi14"] == 48.0
+    assert row["signal_h4_rsi14"] is None
 
 
 if __name__ == "__main__":
     test_table18_has_numeric_levels_and_complete_mtf_context()
     test_missing_indicators_remain_null_and_invalid_geometry_rejected()
     test_historical_indicator_values_are_attached_to_signal_timestamp()
+    test_future_indicator_snapshot_is_rejected()
+    test_partial_historical_snapshots_never_fall_back_to_latest_context()
     print("SQAO Table 18 complete audit tests: OK")

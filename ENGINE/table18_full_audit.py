@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 TIMEFRAMES = ("D1", "H4", "H1", "M15", "M5", "M1")
+TIMEFRAME_SECONDS = {"D1": 86400, "H4": 14400, "H1": 3600, "M15": 900, "M5": 300, "M1": 60}
 INDICATORS = (
     "candles_used", "last_closed_epoch", "last_close", "ema9", "ema20", "ema50",
     "rsi14", "atr14", "macd_line", "macd_signal", "macd_histogram",
@@ -59,9 +60,13 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
     """Build one fully numeric row per recorded historical backtest trade."""
     backtest = report.get("backtest") or {}
     trades = backtest.get("trades") or []
-    indicators = report.get("indicators") or {}
     params = backtest.get("parameters") or {}
     rows = []
+    provenance_counts = {
+        "HISTORICAL_AT_SIGNAL": 0,
+        "PARTIAL_HISTORICAL_AT_SIGNAL": 0,
+        "MISSING_HISTORICAL_AT_SIGNAL": 0,
+    }
     for index, trade in enumerate(trades, 1):
         direction = str(trade.get("direction", "")).upper()
         if direction not in {"LONG", "SHORT"}:
@@ -77,9 +82,16 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
         ):
             raise ValueError(f"Trade {index}: invalid entry/SL/TP geometry")
         rr = reward / risk
+        try:
+            signal_epoch = int(trade.get("signal_epoch"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Trade {index}: missing/invalid signal_epoch for historical indicator audit") from exc
+        historical = trade.get("indicator_snapshots_at_signal")
+        historical = historical if isinstance(historical, dict) else {}
+        valid_timeframes = []
         row = {
             "candidate_id": index, "sample": trade.get("sample", "NOT_AVAILABLE"),
-            "direction": direction, "signal_epoch": trade.get("signal_epoch"),
+            "direction": direction, "signal_epoch": signal_epoch,
             "entry_epoch": trade.get("entry_epoch"), "entry": entry,
             "stop_loss": stop, "take_profit": target,
             "exit_epoch": trade.get("exit_epoch"),
@@ -93,23 +105,50 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
             "round_trip_cost_price_units": params.get("round_trip_cost_price"),
             "exit_reason": trade.get("exit_reason", "NOT_AVAILABLE"),
             "holding_bars": trade.get("holding_bars", "NOT_AVAILABLE"),
-            "signal_time_utc": _epoch_iso(trade.get("signal_epoch")),
+            "signal_time_utc": _epoch_iso(signal_epoch),
             "entry_time_utc": _epoch_iso(trade.get("entry_epoch")),
-            "indicator_provenance": "HISTORICAL_AT_SIGNAL" if trade.get("indicator_snapshots_at_signal") else "LATEST_REPORT_CONTEXT_NOT_HISTORICAL_AT_ENTRY",
         }
-        # Latest indicator values are retained per timeframe without pretending
-        # that these are the values that existed at the historical signal time.
+        # Historical rows must never inherit report-time/latest indicators.
+        # chart_indicator_snapshot.last_closed_epoch stores the candle OPEN epoch;
+        # add the timeframe duration to prove that its close preceded the signal.
         for tf in TIMEFRAMES:
-            historical = trade.get("indicator_snapshots_at_signal") or {}
-            snap = historical.get(tf) or indicators.get(tf) or {}
-            prefix = f"signal_{tf.lower()}_" if historical.get(tf) else f"latest_{tf.lower()}_"
+            snap = historical.get(tf)
+            snap = snap if isinstance(snap, dict) else {}
+            candle_open_epoch = snap.get("last_closed_epoch")
+            close_epoch = None
+            if candle_open_epoch is not None:
+                try:
+                    candle_open_epoch = int(candle_open_epoch)
+                    close_epoch = candle_open_epoch + TIMEFRAME_SECONDS[tf]
+                except (TypeError, ValueError, OverflowError):
+                    candle_open_epoch = None
+                    close_epoch = None
+            if close_epoch is not None and close_epoch > signal_epoch:
+                raise ValueError(
+                    f"Trade {index} {tf}: indicator candle closes after signal "
+                    f"({close_epoch} > {signal_epoch}); look-ahead contamination"
+                )
+            is_valid = bool(snap) and close_epoch is not None
+            if is_valid:
+                valid_timeframes.append(tf)
+            prefix = f"signal_{tf.lower()}_"
             for key in INDICATORS:
-                row[f"{prefix}{key}"] = snap.get(key)
-            row[f"{prefix}ema_stack"] = snap.get("ema_stack", "NOT_AVAILABLE")
-            row[f"{prefix}trend_vote"] = (snap.get("group_votes") or {}).get("trend", "NOT_AVAILABLE")
-            row[f"{prefix}macd_vote"] = (snap.get("group_votes") or {}).get("momentum_macd", "NOT_AVAILABLE")
-            row[f"{prefix}oscillator_vote"] = (snap.get("group_votes") or {}).get("oscillator_rsi_stoch", "NOT_AVAILABLE")
-            row[f"{prefix}adx_di_vote"] = (snap.get("group_votes") or {}).get("directional_strength_adx_di", "NOT_AVAILABLE")
+                row[f"{prefix}{key}"] = snap.get(key) if is_valid else None
+            row[f"{prefix}candle_open_epoch"] = candle_open_epoch if is_valid else None
+            row[f"{prefix}candle_close_epoch"] = close_epoch if is_valid else None
+            row[f"{prefix}snapshot_status"] = "VALID_AT_SIGNAL" if is_valid else "MISSING"
+            row[f"{prefix}ema_stack"] = snap.get("ema_stack", "NOT_AVAILABLE") if is_valid else "NOT_AVAILABLE"
+            votes = snap.get("group_votes") or {}
+            row[f"{prefix}trend_vote"] = votes.get("trend", "NOT_AVAILABLE") if is_valid else "NOT_AVAILABLE"
+            row[f"{prefix}macd_vote"] = votes.get("momentum_macd", "NOT_AVAILABLE") if is_valid else "NOT_AVAILABLE"
+            row[f"{prefix}oscillator_vote"] = votes.get("oscillator_rsi_stoch", "NOT_AVAILABLE") if is_valid else "NOT_AVAILABLE"
+            row[f"{prefix}adx_di_vote"] = votes.get("directional_strength_adx_di", "NOT_AVAILABLE") if is_valid else "NOT_AVAILABLE"
+        provenance = ("HISTORICAL_AT_SIGNAL" if len(valid_timeframes) == len(TIMEFRAMES)
+                      else "PARTIAL_HISTORICAL_AT_SIGNAL" if valid_timeframes
+                      else "MISSING_HISTORICAL_AT_SIGNAL")
+        row["indicator_provenance"] = provenance
+        row["indicator_timeframes_valid"] = valid_timeframes
+        provenance_counts[provenance] += 1
         rows.append(row)
 
     def summarize(sample: str) -> dict[str, Any]:
@@ -159,13 +198,14 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
         "read_only": True,
         "rule": backtest.get("rule"),
         "parameters": params,
-        "methodology": "One row per actual chronological backtest trade. Entry/SL/TP/exit are copied from recorded OHLC ledger. EMA9/20/50, Bollinger20/2, MACD12/26/9, Wilder RSI/ATR/ADX/DI14 and Stochastic14/3/3 are recomputed only from candles closed by each signal timestamp. Missing fields remain null.",
+        "methodology": "One row per actual chronological backtest trade. Entry/SL/TP/exit are copied from recorded OHLC ledger. EMA9/20/50, Bollinger20/2, MACD12/26/9, Wilder RSI/ATR/ADX/DI14 and Stochastic14/3/3 are recomputed from each timeframe's candles closed by the signal timestamp. Each snapshot close epoch is checked against signal_epoch; future snapshots raise an error. Report-time indicators are never copied into historical rows. Missing historical fields remain null.",
         "field_order": list(rows[0].keys()) if rows else list(BASE_FIELDS),
         "row_count": len(rows),
         "summary": {sample: summarize(sample) for sample in ("train", "out_of_sample")},
+        "indicator_provenance_counts": provenance_counts,
         "rows": rows,
         "costs_verified": False,
-        "missing_data_policy": "Missing indicator values remain null/NOT_AVAILABLE; no imputation or pixel-derived execution prices.",
+        "missing_data_policy": "Missing historical indicator values remain null/NOT_AVAILABLE; no latest-context fallback, imputation or pixel-derived execution prices. Future-dated snapshots fail the build.",
     }
 
 
