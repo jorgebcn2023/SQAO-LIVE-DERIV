@@ -2,7 +2,29 @@
 import time
 import unittest
 
-from API.app import GRANULARITY, TIMEFRAMES, _closed_candles, app
+from API.app import GRANULARITY, TIMEFRAMES, _build_integrity_gate, _closed_candles, app
+
+
+class IntegrityGateTests(unittest.TestCase):
+    def test_candidate_requires_all_integrity_conditions(self):
+        setup = {"confirmed": True, "state": "TRIGGER_CONFIRMED"}
+        passed = _build_integrity_gate({"status": "PASS"}, True, setup)
+        self.assertEqual(passed["status"], "PASS")
+        self.assertTrue(passed["candidate_review_allowed"])
+
+    def test_mtf_block_forces_integrity_block(self):
+        result = _build_integrity_gate({"status": "BLOCKED", "blockers": ["M1:STALE"]}, True,
+                                       {"confirmed": True})
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertFalse(result["candidate_review_allowed"])
+        self.assertIn("M1:STALE", result["blockers"])
+
+    def test_incomplete_sample_and_gap_are_reported(self):
+        result = _build_integrity_gate({"status": "PASS"}, False,
+                                       {"confirmed": False, "state": "DATA_GAP_BLOCK"})
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("INSUFFICIENT_ALIGNED_CLOSED_CANDLES", result["blockers"])
+        self.assertIn("NON_CONTIGUOUS_SIGNAL_WINDOW", result["blockers"])
 
 
 class ClosedCandleTests(unittest.TestCase):
@@ -26,7 +48,7 @@ class ClosedCandleTests(unittest.TestCase):
         self.assertEqual(result[0]["close"], 12.0)
 
     def test_api_is_versioned_and_read_only_routes_have_no_trade_methods(self):
-        self.assertEqual(app.version, "2.5.0")
+        self.assertEqual(app.version, "2.6.0")
         methods = {
             method.lower()
             for route in app.routes
@@ -39,6 +61,7 @@ class ClosedCandleTests(unittest.TestCase):
         self.assertIn("/market/active-symbols", paths)
         self.assertIn("/market/ohlc", paths)
         self.assertIn("/analysis/snapshot", paths)
+        self.assertFalse(any(getattr(route, "path", "") in {"/proposal", "/buy", "/sell"} for route in app.routes))
 
 
 if __name__ == "__main__":

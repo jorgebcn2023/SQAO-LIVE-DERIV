@@ -1,60 +1,72 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
-  title: SQAO Live API
-  version: 1.0.0
+  title: SQAO Live Deriv API
+  version: 2.6.0
+  description: >-
+    Read-only Deriv Step Index API. Snapshot includes closed D1/H4/H1/M15/M5/M1
+    candles, MTF synchronization and data integrity gates. Decisions remain
+    NO_TRADE and execution_eligible=false until all-in costs and chronological
+    out-of-sample eligibility are independently verified. No trading operations.
 servers:
   - url: https://sqao-live-api-v2.onrender.com
 paths:
   /health:
     get:
       operationId: health
-      summary: Check API health
+      summary: Check API, connector and market-data freshness
       responses:
         '200':
-          description: Healthy
+          description: Service state and freshness by timeframe
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, enum: [ok, degraded]}
+                  service: {type: string}
+                  version: {type: string, example: "2.6.0"}
+                  mtf_sync_version: {type: string}
+                  required_timeframes:
+                    type: array
+                    items: {type: string}
+                  read_only: {type: boolean}
+                  background_connector_running: {type: boolean}
+                  market_data: {type: object}
   /market/active-symbols:
     get:
-      operationId: getStepIndexSymbols
-      summary: Get available Step Index symbols
+      operationId: getActiveStepSymbols
+      summary: Discover active Step Index symbols from Deriv
       responses:
         '200':
-          description: Step Index symbols
+          description: Active symbols from Deriv public market data
   /market/ohlc:
     get:
-      operationId: getOhlc
-      summary: Get Step Index OHLC candles
+      operationId: getStepOHLC
+      summary: Retrieve fully closed, validated OHLC candles
       parameters:
-        - name: symbol
-          in: query
-          schema:
-            type: string
-            default: stpRNG
-        - name: timeframe
-          in: query
-          schema:
-            type: string
-            enum: [M1, M5, M15, H1, D1]
-            default: M1
-        - name: count
-          in: query
-          schema:
-            type: integer
-            minimum: 10
-            maximum: 500
-            default: 120
+        - {name: symbol, in: query, schema: {type: string, default: AUTO}}
+        - {name: timeframe, in: query, schema: {type: string, enum: [M1, M5, M15, H1, H4, D1], default: M1}}
+        - {name: count, in: query, schema: {type: integer, minimum: 20, maximum: 500, default: 500}}
       responses:
         '200':
-          description: OHLC candles
+          description: Timestamped closed OHLC candles
+        '502':
+          description: Deriv upstream error or insufficient market data
   /analysis/snapshot:
     get:
-      operationId: getMtfSnapshot
-      summary: Get D1 H1 M15 M5 M1 market snapshot
+      operationId: getSQAOQuantSnapshot
+      summary: Retrieve the complete six-timeframe SQAO audit
+      description: >-
+        Resolves AUTO against active Step Index symbols; returns closed candles,
+        data_quality, mtf_sync_gate and integrity_gate. A candidate is reviewable
+        only when the technical setup, MTF synchronization and data integrity
+        gates pass. This is not execution authorization. NO_TRADE is enforced
+        while all-in costs and OOS eligibility remain unverified.
       parameters:
-        - name: symbol
-          in: query
-          schema:
-            type: string
-            default: stpRNG
+        - {name: symbol, in: query, schema: {type: string, default: AUTO}}
+        - {name: count, in: query, schema: {type: integer, minimum: 20, maximum: 500, default: 500}}
       responses:
         '200':
-          description: MTF snapshot
+          description: Read-only MTF research snapshot
+        '502':
+          description: Deriv upstream error or insufficient candles

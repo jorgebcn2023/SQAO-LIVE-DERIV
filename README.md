@@ -1,4 +1,4 @@
-# SQAO-LIVE-DERIV v3.2.1
+# SQAO LIVE DERIV V2.6.0
 
 Sistema de análisis **read-only** para Synthetic Indices de Deriv, con motor cuantitativo SQAO, análisis MTF y capa multimodal GPT.
 
@@ -162,3 +162,10 @@ The existing V2.1 chart OCR/geometry layer is retained; no duplicate OCR engine 
 The GPT Vision reconciliation layer includes the synchronization audit in its prompt and must not produce actionable entries when the gate is blocked. Tests: `python -m ENGINE.test_mtf_sync`.
 
 The source PDF "Optimización Operativa Step Index" is treated as research material only: its weighted 83.25% sell score is not a probability, its assumed 65% win rate is not empirical evidence, and its SMC/AMD, zero-slippage and contract-value claims require independent validation. No PDF scenario price is promoted to a live quote or trade level. READ-ONLY / RESEARCH-ONLY remains unchanged.
+
+
+## SQAO LIVE DERIV V2.6 — Integrity & Validation
+
+V2.6 unifica la versión visible del API y la documentación GPT en 2.6.0. Añade un `integrity_gate` separado de la sincronización MTF: exige sincronización temporal aprobada, muestra mínima alineada y ausencia de bloqueo por ventana de señal no contigua. `candidate_confirmed` solo puede ser true si el setup, MTF y gate de integridad pasan conjuntamente. Esto no autoriza ejecución: `decision=NO_TRADE`, `execution_eligible=false` y `cost_gate=BLOCKED_MISSING_VERIFIABLE_ALL_IN_COST` se mantienen hasta validar costes y elegibilidad OOS de forma independiente.
+
+Archivos GPT: `GPT/PROMPT_MAESTRO_V2.6_ES.md` y `GPT/SQAO_GPT_INSTRUCTIONS.md`. Pruebas API: `python -m unittest API.test_app`. No se despliega automáticamente desde esta rama. El estado LIVE de Render no sustituye una comprobación HTTP real.

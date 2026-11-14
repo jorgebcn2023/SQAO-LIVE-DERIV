@@ -22,7 +22,7 @@ GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 8
 RUN_CONNECTOR = os.getenv("SQAO_RUN_CONNECTOR", "true").strip().lower() in {"1", "true", "yes", "on"}
 DATA_DIR = Path(os.getenv("SQAO_DATA_DIR", "DATA"))
 
-app = FastAPI(title="SQAO Live API", version="2.5.0", docs_url="/docs", redoc_url="/redoc")
+app = FastAPI(title="SQAO Live API", version="2.6.0", docs_url="/docs", redoc_url="/redoc")
 _connector_task: asyncio.Task | None = None
 _connector_started_at: str | None = None
 
@@ -120,6 +120,8 @@ async def health():
         "status": "ok" if connector_ok else "degraded",
         "service": "SQAO Live API",
         "version": app.version,
+        "mtf_sync_version": MTF_SYNC_VERSION,
+        "required_timeframes": list(TIMEFRAMES),
         "read_only": True,
         "background_connector_enabled": RUN_CONNECTOR,
         "background_connector_running": bool(task_running),
@@ -274,6 +276,28 @@ def _frame_context(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return timeframe_snapshot(normalized)
 
 
+def _build_integrity_gate(
+    mtf_sync_gate: dict[str, Any],
+    data_complete: bool,
+    setup: dict[str, Any],
+) -> dict[str, Any]:
+    """Combine independent MTF, sample-depth and signal-window integrity checks."""
+    blockers: list[str] = []
+    if mtf_sync_gate.get("status") != "PASS":
+        blockers.extend(mtf_sync_gate.get("blockers") or ["MTF_SYNC_BLOCKED"])
+    if not data_complete:
+        blockers.append("INSUFFICIENT_ALIGNED_CLOSED_CANDLES")
+    if setup.get("state") == "DATA_GAP_BLOCK":
+        blockers.append("NON_CONTIGUOUS_SIGNAL_WINDOW")
+    blockers = sorted(set(blockers))
+    return {
+        "status": "PASS" if not blockers else "BLOCKED",
+        "candidate_review_allowed": bool(setup.get("confirmed")) and not blockers,
+        "blockers": blockers,
+        "policy": "A candidate can be reviewed only when MTF timestamps, aligned sample depth and signal-window continuity pass. This does not authorize execution.",
+    }
+
+
 @app.get("/analysis/snapshot")
 async def analysis_snapshot(
     symbol: str = Query(default="AUTO", description="Deriv Step Index symbol; AUTO autodetects an active Step Index"),
@@ -325,10 +349,14 @@ async def analysis_snapshot(
             "latest_closed_utc": datetime.fromtimestamp(latest, timezone.utc).isoformat() if latest is not None else None,
         }
 
-    # This endpoint is a research detector. Unverified all-in execution costs
-    # block any validated or executable recommendation.
+    data_complete = all(len(aligned[tf]) >= required for tf, required in
+                         {"M1": 40, "M5": 40, "M15": 30, "H1": 30, "H4": 30}.items())
+    integrity_gate = _build_integrity_gate(mtf_sync_gate, data_complete, setup)
+
+    # This endpoint is research-only. Costs/OOS are not certified by live signal confirmation.
     return {
-        "api_version": "2.5.0",
+        "api_version": "2.6.0",
+        "integrity_gate": integrity_gate,
         "mtf_sync_version": MTF_SYNC_VERSION,
         "mtf_sync_gate": mtf_sync_gate,
         "mtf_sync_passed": mtf_sync_passed,
@@ -339,13 +367,12 @@ async def analysis_snapshot(
         "read_only": True,
         "decision": "NO_TRADE",
         "candidate_setup": setup,
-        "candidate_confirmed": bool(setup.get("confirmed")) and mtf_sync_passed,
+        "candidate_confirmed": bool(setup.get("confirmed")) and integrity_gate["status"] == "PASS",
         "execution_eligible": False,
         "cost_gate": "BLOCKED_MISSING_VERIFIABLE_ALL_IN_COST",
         "decision_epoch": decision_epoch,
         "next_m1_open": next_open,
-        "data_complete": all(len(aligned[tf]) >= required for tf, required in
-                             {"M1": 40, "M5": 40, "M15": 30, "H1": 30, "H4": 30}.items()),
+        "data_complete": data_complete,
         "data_quality": data_quality,
         "timeframes": context,
         "candles": frames,
