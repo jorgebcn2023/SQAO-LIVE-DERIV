@@ -261,7 +261,7 @@ async def _current_m1_open(symbol: str) -> dict[str, Any] | None:
         epoch = int(row["epoch"])
         price = float(row["open"])
         now = int(datetime.now(timezone.utc).timestamp())
-        if not __import__("math").isfinite(price) or price <= 0 or not (epoch <= now < epoch + 60):
+        if not math.isfinite(price) or price <= 0 or not (epoch <= now < epoch + 60):
             return None
         return {"epoch": epoch, "open": price, "source": "Deriv current M1 candle open"}
     except (KeyError, TypeError, ValueError, OverflowError):
