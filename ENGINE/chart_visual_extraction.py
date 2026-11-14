@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-VERSION = "2.1.0"
+VERSION = "2.5.0"
 TIMEFRAMES = ("D1", "H4", "H1", "M15", "M5", "M1")
 INDICATORS = ("EMA 9", "EMA 20", "EMA 50", "Bollinger 20,2",
               "MACD 12,26,9", "RSI 14", "ATR 14", "ADX 14",
