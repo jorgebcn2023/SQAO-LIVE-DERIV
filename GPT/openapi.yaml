@@ -3,70 +3,199 @@ info:
   title: SQAO Live Deriv API
   version: 2.6.0
   description: >-
-    Read-only Deriv Step Index API. Snapshot includes closed D1/H4/H1/M15/M5/M1
-    candles, MTF synchronization and data integrity gates. Decisions remain
-    NO_TRADE and execution_eligible=false until all-in costs and chronological
-    out-of-sample eligibility are independently verified. No trading operations.
+    Read-only Deriv Step Index research API. All exposed operations are GET.
+    No order placement, modification, cancellation or account trading endpoints
+    are exposed. Live candidate analysis is research-only: decision remains
+    NO_TRADE and execution_eligible=false until independent all-in cost and
+    chronological out-of-sample validation requirements are met.
 servers:
   - url: https://sqao-live-api-v2.onrender.com
+    description: Render API host; deployed version must be verified with /health.
 paths:
   /health:
     get:
       operationId: health
-      summary: Check API, connector and market-data freshness
+      summary: Check API version, connector state and market-data freshness
       responses:
         '200':
           description: Service state and freshness by timeframe
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status: {type: string, enum: [ok, degraded]}
-                  service: {type: string}
-                  version: {type: string, example: "2.6.0"}
-                  mtf_sync_version: {type: string}
-                  required_timeframes:
-                    type: array
-                    items: {type: string}
-                  read_only: {type: boolean}
-                  background_connector_running: {type: boolean}
-                  market_data: {type: object}
+                $ref: '#/components/schemas/Health'
   /market/active-symbols:
     get:
       operationId: getActiveStepSymbols
-      summary: Discover active Step Index symbols from Deriv
+      summary: Discover active Step Index symbols from Deriv public market data
+      parameters:
+        - $ref: '#/components/parameters/SQAOKey'
       responses:
         '200':
-          description: Active symbols from Deriv public market data
+          description: Active Step Index symbols
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  symbols:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        symbol: {type: string}
+                        display_name: {type: string}
+                  count: {type: integer}
+                  source: {type: string}
+        '401':
+          description: Invalid SQAO API key when server-side key protection is enabled
+        '502':
+          description: Deriv public market-data request failed
   /market/ohlc:
     get:
       operationId: getStepOHLC
-      summary: Retrieve fully closed, validated OHLC candles
+      summary: Retrieve fully closed and validated OHLC candles
       parameters:
-        - {name: symbol, in: query, schema: {type: string, default: AUTO}}
-        - {name: timeframe, in: query, schema: {type: string, enum: [M1, M5, M15, H1, H4, D1], default: M1}}
-        - {name: count, in: query, schema: {type: integer, minimum: 20, maximum: 500, default: 500}}
+        - $ref: '#/components/parameters/SQAOKey'
+        - name: symbol
+          in: query
+          required: false
+          description: Exact Deriv symbol or AUTO to discover an active Step Index symbol.
+          schema: {type: string, default: AUTO}
+        - name: timeframe
+          in: query
+          required: false
+          schema: {type: string, enum: [M1, M5, M15, H1, H4, D1], default: M1}
+        - name: count
+          in: query
+          required: false
+          schema: {type: integer, minimum: 20, maximum: 500, default: 500}
       responses:
         '200':
-          description: Timestamped closed OHLC candles
+          description: Timestamped, closed OHLC candles from Deriv
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  symbol: {type: string}
+                  symbol_resolution: {type: string}
+                  timeframe: {type: string}
+                  granularity_seconds: {type: integer}
+                  count: {type: integer}
+                  latest_closed_epoch: {type: integer}
+                  latest_closed_utc: {type: string, format: date-time}
+                  source: {type: string}
+                  read_only: {type: boolean, const: true}
+                  candles:
+                    type: array
+                    items: {$ref: '#/components/schemas/Candle'}
+        '401':
+          description: Invalid SQAO API key when protection is enabled
+        '422':
+          description: Invalid timeframe or count
         '502':
-          description: Deriv upstream error or insufficient market data
+          description: Deriv upstream error or no completed valid candles
   /analysis/snapshot:
     get:
       operationId: getSQAOQuantSnapshot
-      summary: Retrieve the complete six-timeframe SQAO audit
+      summary: Retrieve the complete six-timeframe SQAO research audit
       description: >-
-        Resolves AUTO against active Step Index symbols; returns closed candles,
-        data_quality, mtf_sync_gate and integrity_gate. A candidate is reviewable
-        only when the technical setup, MTF synchronization and data integrity
-        gates pass. This is not execution authorization. NO_TRADE is enforced
-        while all-in costs and OOS eligibility remain unverified.
+        Resolves AUTO against active Step Index symbols and retrieves closed
+        D1/H4/H1/M15/M5/M1 candles. Returns data quality, MTF synchronization
+        and integrity gates. Candidate confirmation is review-only and never
+        authorizes execution. The API enforces NO_TRADE and execution_eligible=false.
       parameters:
-        - {name: symbol, in: query, schema: {type: string, default: AUTO}}
-        - {name: count, in: query, schema: {type: integer, minimum: 20, maximum: 500, default: 500}}
+        - $ref: '#/components/parameters/SQAOKey'
+        - name: symbol
+          in: query
+          required: false
+          schema: {type: string, default: AUTO}
+        - name: count
+          in: query
+          required: false
+          schema: {type: integer, minimum: 20, maximum: 500, default: 500}
       responses:
         '200':
-          description: Read-only MTF research snapshot
+          description: Read-only multi-timeframe research snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+        '401':
+          description: Invalid SQAO API key when protection is enabled
+        '422':
+          description: Invalid count
         '502':
-          description: Deriv upstream error or insufficient candles
+          description: Deriv upstream error or insufficient candle history
+components:
+  parameters:
+    SQAOKey:
+      name: X-SQAO-Key
+      in: header
+      required: false
+      description: >-
+        Only required if SQAO_ACTION_KEY is configured on the server.
+        Never expose or embed this secret in public GPT instructions.
+      schema: {type: string}
+  schemas:
+    Candle:
+      type: object
+      required: [epoch, open, high, low, close]
+      properties:
+        epoch: {type: integer, description: Unix epoch of candle start}
+        open: {type: number}
+        high: {type: number}
+        low: {type: number}
+        close: {type: number}
+    Health:
+      type: object
+      properties:
+        status: {type: string, enum: [ok, degraded]}
+        service: {type: string}
+        version: {type: string}
+        mtf_sync_version: {type: string}
+        required_timeframes:
+          type: array
+          items: {type: string}
+        read_only: {type: boolean}
+        background_connector_enabled: {type: boolean}
+        background_connector_running: {type: boolean}
+        background_connector_started_at_utc: {type: [string, 'null']}
+        background_connector_error: {type: [string, 'null']}
+        market_data:
+          type: object
+          properties:
+            timeframes: {type: object, additionalProperties: true}
+            max_data_age_seconds: {type: integer}
+            all_timeframes_fresh: {type: boolean}
+    Snapshot:
+      type: object
+      required: [api_version, integrity_gate, mtf_sync_gate, symbol, source, read_only, decision, execution_eligible, cost_gate, data_quality, timeframes, candles, generated_at_utc]
+      properties:
+        api_version: {type: string}
+        integrity_gate: {type: object, additionalProperties: true}
+        mtf_sync_version: {type: string}
+        mtf_sync_gate: {type: object, additionalProperties: true}
+        mtf_sync_passed: {type: boolean}
+        engine: {type: string}
+        symbol: {type: string}
+        symbol_resolution: {type: string}
+        source: {type: string}
+        read_only: {type: boolean, const: true}
+        decision: {type: string, enum: [NO_TRADE]}
+        candidate_setup: {type: object, additionalProperties: true}
+        candidate_confirmed: {type: boolean}
+        execution_eligible: {type: boolean, const: false}
+        cost_gate: {type: string}
+        decision_epoch: {type: [integer, 'null']}
+        next_m1_open: {type: [object, 'null'], additionalProperties: true}
+        data_complete: {type: boolean}
+        data_quality: {type: object, additionalProperties: true}
+        timeframes: {type: object, additionalProperties: true}
+        candles:
+          type: object
+          additionalProperties:
+            type: array
+            items: {$ref: '#/components/schemas/Candle'}
+        generated_at_utc: {type: string, format: date-time}
+        note: {type: string}
