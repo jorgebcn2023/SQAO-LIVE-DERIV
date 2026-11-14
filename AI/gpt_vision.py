@@ -9,12 +9,13 @@ from typing import Iterable
 
 from openai import OpenAI
 from ENGINE.chart_visual_extraction import build_visual_audit
+from ENGINE.mtf_sync import audit_mtf_synchronization
 
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6")
 
 SYSTEM_PROMPT = """You are the visual analysis and reconciliation layer of SQAO-LIVE-DERIV.
 
-Analyze all uploaded Step Index charts jointly using the strict MTF hierarchy D1 > H1 > M15 > M5 > M1.
+Analyze all uploaded Step Index charts jointly using the strict MTF hierarchy D1 > H4 > H1 > M15 > M5 > M1.
 The quantitative snapshot is supplied by the SQAO backend and is the live-data source when present.
 
 Rules:
@@ -26,6 +27,8 @@ Rules:
 - For Table 18, output the full numeric schema for LONG and SHORT; use null/NOT_AVAILABLE for unreadable or unsupported fields, never omit columns or fabricate values.
 - Separate OBSERVED facts from INFERRED scenarios.
 - Check whether uploaded charts are synchronized. Flag missing, duplicated, stale, or contradictory timeframes.
+- The quantitative MTF synchronization gate is mandatory. If mtf_sync_gate.status is BLOCKED, do not issue an actionable entry; return NO_TRADE or WAIT and list every blocker.
+- Require timestamped quantitative closed candles for all six frames. Screenshot axis labels are not OHLC timestamps and cannot satisfy the gate.
 - Compare visual structure against quantitative direction, EMA, RSI, ATR and latest close when supplied.
 - Report quant/vision disagreement explicitly.
 - Prefer WAIT or NO_TRADE when evidence is incomplete, stale, contradictory, or materially extended.
@@ -92,6 +95,8 @@ def analyze_images(
     snapshot_text = json.dumps(market_snapshot or {}, ensure_ascii=False, indent=2)[:50000]
     image_manifest = "\n".join(f"- {label}" for _, label in image_items)
     visual_audit = build_visual_audit({label: path for path, label in image_items})
+    sync_audit = audit_mtf_synchronization(market_snapshot)
+    visual_audit["mtf_sync_gate"] = sync_audit
     visual_audit_text = json.dumps(visual_audit, ensure_ascii=False, indent=2)[:50000]
     content = [{
         "type": "input_text",

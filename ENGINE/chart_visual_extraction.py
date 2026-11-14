@@ -14,14 +14,31 @@ import re
 from pathlib import Path
 from typing import Any
 
-VERSION = "2.1.0"
+VERSION = "2.5.0"
 TIMEFRAMES = ("D1", "H4", "H1", "M15", "M5", "M1")
 INDICATORS = ("EMA 9", "EMA 20", "EMA 50", "Bollinger 20,2",
               "MACD 12,26,9", "RSI 14", "ATR 14", "ADX 14",
               "+DI 14", "-DI 14", "Stochastic 14,3,3")
 
 NUM_RE = re.compile(r"(?<![A-Za-z])[-+]?\d{1,7}(?:[.,]\d+)?")
-TF_RE = re.compile(r"\b(D1|H4|H1|M15|M5|M1)\b", re.I)
+TF_RE = re.compile(r"\b(D1|DAILY|1D|H4|4HOUR|4H|H1|1H|60M|M15|15M|M5|5M|M1|1M)\b", re.I)
+
+
+def _normalize_timeframe(value: str | None) -> str | None:
+    if not value:
+        return None
+    aliases = {
+        "D1": "D1", "DAILY": "D1", "1D": "D1",
+        "H4": "H4", "4H": "H4", "4HOUR": "H4",
+        "H1": "H1", "1H": "H1", "60M": "H1",
+        "M15": "M15", "15M": "M15",
+        "M5": "M5", "5M": "M5",
+        "M1": "M1", "1M": "M1",
+    }
+    for match in TF_RE.findall(str(value).upper()):
+        if match.upper() in aliases:
+            return aliases[match.upper()]
+    return aliases.get(str(value).strip().upper())
 MACD_RE = re.compile(r"MACD\s*\(\s*12\s*,\s*26\s*,\s*9\s*\)\s*([-+]?\d+[.,]\d+)\s*([-+]?\d+[.,]\d+)", re.I)
 
 
@@ -151,17 +168,26 @@ def audit_chart(path: str | Path, timeframe: str | None = None) -> dict[str, Any
         return {"source": str(p), "status": "FILE_NOT_FOUND"}
     raw = _ocr(p)
     text = raw.get("text", "")
-    detected = [x.upper() for x in TF_RE.findall(text)]
-    supplied_tf = timeframe.upper() if timeframe else None
-    filename_tf = [x.upper() for x in TF_RE.findall(p.stem)]
-    tf = (supplied_tf if supplied_tf in TIMEFRAMES else
-          detected[0] if detected else filename_tf[0] if filename_tf else None)
+    detected = [_normalize_timeframe(x) for x in TF_RE.findall(text)]
+    detected = [x for x in detected if x]
+    supplied_tf = _normalize_timeframe(timeframe)
+    filename_tf = [_normalize_timeframe(x) for x in TF_RE.findall(p.stem)]
+    filename_tf = [x for x in filename_tf if x]
+    if supplied_tf:
+        tf, timeframe_source = supplied_tf, "INPUT_LABEL"
+    elif detected:
+        tf, timeframe_source = detected[0], "OCR"
+    elif filename_tf:
+        tf, timeframe_source = filename_tf[0], "FILENAME"
+    else:
+        tf, timeframe_source = None, "UNDETECTED"
     size = raw.get("image_size") or [0, 0]
     calibration = _axis_calibration(raw.get("tokens", []), size[0]) if size else {
         "status": "NOT_CALIBRATED", "axis_labels": [], "price_per_pixel": None, "intercept": None}
     quote = _horizontal_quote(p, calibration) if size else {"status": "NOT_AVAILABLE", "price": None}
     return {
         "version": VERSION, "source_file": p.name, "timeframe": tf,
+        "timeframe_source": timeframe_source,
         "detected_timeframes": detected, "status": raw["status"],
         "image_size": raw.get("image_size"), "ocr_text": text,
         "numeric_tokens": [{"text": t["text"], "value": _num(t["text"]),
@@ -207,11 +233,20 @@ def table18_template(reference_price: float | None = None) -> dict[str, Any]:
 
 
 def build_visual_audit(images: dict[str, str | Path], output: str | Path | None = None) -> dict[str, Any]:
-    charts = {tf.upper(): audit_chart(path, tf) for tf, path in images.items()}
+    charts = {str(label): audit_chart(path, str(label)) for label, path in images.items()}
+    observed = [chart.get("timeframe") for chart in charts.values() if chart.get("timeframe")]
+    duplicates = sorted({tf for tf in observed if observed.count(tf) > 1})
+    missing = [tf for tf in TIMEFRAMES if tf not in observed]
     # No artificial synchronization: preserve each chart's own source and time labels.
     report = {
         "version": VERSION, "mode": "READ_ONLY_RESEARCH_ONLY",
         "charts": charts, "table18": table18_template(),
+        "visual_timeframe_audit": {
+            "observed_timeframes": observed,
+            "missing_timeframes": missing,
+            "duplicate_timeframes": duplicates,
+            "status": "COMPLETE_SET" if not missing and not duplicates else "INCOMPLETE_OR_DUPLICATED",
+        },
         "mtf_synchronization": "NOT_VERIFIED_FROM_SCREENSHOTS",
         "decision": "NO_TRADE",
         "reason": "Visual extraction is contextual evidence only; no closed OHLC, timestamp alignment, verified costs or OOS statistics supplied.",
