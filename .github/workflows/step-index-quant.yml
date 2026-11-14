@@ -34,7 +34,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: sqao-step-index-quant
+  # Isolate runs by Git ref: an older research run on another branch must not
+  # hold the global lock and leave the current PR validation permanently pending.
+  group: sqao-step-index-quant-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
