@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: SQAO Live Deriv API
-  version: 2.2.0
+  version: 2.4.4-rc1
   description: >-
-    Read-only live Deriv Step Index market-data API. Snapshot includes D1,
-    H1, M15, M5 and M1 candles plus quantitative indicators. Scenario estimates
-    are not historical win rates or guarantees. No trading operations are exposed.
+    Read-only live Deriv Step Index API. Snapshot includes closed D1, H4, H1,
+    M15, M5 and M1 candles and the canonical v23 research detector. The endpoint
+    enforces NO_TRADE until all-in costs and OOS eligibility are verified. No trading operations are exposed.
 servers:
   - url: https://sqao-live-api-v2.onrender.com
 paths:
@@ -62,7 +62,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [M1, M5, M15, H1, D1]
+            enum: [M1, M5, M15, H1, H4, D1]
             default: M1
         - name: count
           in: query
@@ -82,9 +82,10 @@ paths:
       operationId: getSQAOQuantSnapshot
       summary: Get complete live multi-timeframe analysis
       description: >-
-        Resolves symbol=AUTO against active Step Index symbols, retrieves
-        D1/H1/M15/M5/M1 candles and computes a conservative quantitative snapshot.
-        Treat decisions and scenario scores as estimates, not validated win rates.
+        Resolves symbol=AUTO against active Step Index symbols, retrieves closed
+        D1/H4/H1/M15/M5/M1 candles, aligns H4/H1/M15/M5/M1 at the latest closed M1
+        decision boundary, and evaluates the canonical v23 detector. Decision is
+        forced to NO_TRADE while costs and OOS eligibility remain unverified.
       parameters:
         - name: symbol
           in: query
