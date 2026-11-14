@@ -9,6 +9,7 @@ from typing import Iterable
 
 from openai import OpenAI
 from ENGINE.chart_visual_extraction import build_visual_audit
+from ENGINE.mtf_sync import audit_mtf_synchronization
 
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6")
 
@@ -92,6 +93,13 @@ def analyze_images(
     snapshot_text = json.dumps(market_snapshot or {}, ensure_ascii=False, indent=2)[:50000]
     image_manifest = "\n".join(f"- {label}" for _, label in image_items)
     visual_audit = build_visual_audit({label: path for path, label in image_items})
+    uploaded_timeframes = tuple(tf for tf in ("D1", "H4", "H1", "M15", "M5", "M1")
+                                if any(chart.get("timeframe") == tf for chart in visual_audit.get("charts", {}).values()))
+    sync_audit = audit_mtf_synchronization(
+        market_snapshot,
+        expected_timeframes=uploaded_timeframes or ("D1", "H4", "H1", "M15", "M5", "M1"),
+    )
+    visual_audit["mtf_sync_gate"] = sync_audit
     visual_audit_text = json.dumps(visual_audit, ensure_ascii=False, indent=2)[:50000]
     content = [{
         "type": "input_text",
