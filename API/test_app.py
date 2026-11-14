@@ -26,7 +26,7 @@ class ClosedCandleTests(unittest.TestCase):
         self.assertEqual(result[0]["close"], 12.0)
 
     def test_api_is_versioned_and_read_only_routes_have_no_trade_methods(self):
-        self.assertEqual(app.version, "2.4.4-rc1")
+        self.assertEqual(app.version, "2.5.0")
         methods = {
             method.lower()
             for route in app.routes
