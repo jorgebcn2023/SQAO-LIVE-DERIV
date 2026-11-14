@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -196,20 +197,23 @@ async def active_symbols(x_sqao_key: str | None = Header(default=None, alias="X-
 async def ohlc(
     symbol: str = Query(default="AUTO", description="Deriv Step Index symbol; AUTO resolves an active Step Index"),
     timeframe: str = Query(default="M1", pattern="^(M1|M5|M15|H1|H4|D1)$"),
-    count: int = Query(default=120, ge=20, le=500),
+    count: int = Query(default=500, ge=20, le=500),
     x_sqao_key: str | None = Header(default=None, alias="X-SQAO-Key"),
 ):
     _check_auth(x_sqao_key)
     resolved, mode = await _resolve_symbol(symbol)
-    candles = await _candles(resolved, timeframe, count)
+    raw_candles = await _candles(resolved, timeframe, count)
+    candles = _closed_candles(raw_candles, timeframe)
     if not candles:
-        raise HTTPException(status_code=502, detail=f"No candles returned for {resolved} {timeframe}")
+        raise HTTPException(status_code=502, detail=f"No completed valid candles returned for {resolved} {timeframe}")
     return {
         "symbol": resolved,
         "symbol_resolution": mode,
         "timeframe": timeframe,
         "granularity_seconds": GRANULARITY[timeframe],
         "count": len(candles),
+        "latest_closed_epoch": candles[-1]["epoch"],
+        "latest_closed_utc": datetime.fromtimestamp(candles[-1]["epoch"], timezone.utc).isoformat(),
         "candles": candles,
         "source": "Deriv public market data",
         "read_only": True,
@@ -227,7 +231,7 @@ def _closed_candles(candles: list[dict[str, Any]], timeframe: str) -> list[dict[
             values = {key: float(candle[key]) for key in ("open", "high", "low", "close")}
             if epoch + granularity > now:
                 continue
-            if not all(__import__("math").isfinite(value) for value in values.values()):
+            if not all(math.isfinite(value) for value in values.values()):
                 continue
             if values["high"] < max(values["open"], values["close"], values["low"]):
                 continue
