@@ -151,17 +151,26 @@ def audit_chart(path: str | Path, timeframe: str | None = None) -> dict[str, Any
         return {"source": str(p), "status": "FILE_NOT_FOUND"}
     raw = _ocr(p)
     text = raw.get("text", "")
-    detected = [x.upper() for x in TF_RE.findall(text)]
-    supplied_tf = timeframe.upper() if timeframe else None
-    filename_tf = [x.upper() for x in TF_RE.findall(p.stem)]
-    tf = (supplied_tf if supplied_tf in TIMEFRAMES else
-          detected[0] if detected else filename_tf[0] if filename_tf else None)
+    detected = [_normalize_timeframe(x) for x in TF_RE.findall(text)]
+    detected = [x for x in detected if x]
+    supplied_tf = _normalize_timeframe(timeframe)
+    filename_tf = [_normalize_timeframe(x) for x in TF_RE.findall(p.stem)]
+    filename_tf = [x for x in filename_tf if x]
+    if supplied_tf:
+        tf, timeframe_source = supplied_tf, "INPUT_LABEL"
+    elif detected:
+        tf, timeframe_source = detected[0], "OCR"
+    elif filename_tf:
+        tf, timeframe_source = filename_tf[0], "FILENAME"
+    else:
+        tf, timeframe_source = None, "UNDETECTED"
     size = raw.get("image_size") or [0, 0]
     calibration = _axis_calibration(raw.get("tokens", []), size[0]) if size else {
         "status": "NOT_CALIBRATED", "axis_labels": [], "price_per_pixel": None, "intercept": None}
     quote = _horizontal_quote(p, calibration) if size else {"status": "NOT_AVAILABLE", "price": None}
     return {
         "version": VERSION, "source_file": p.name, "timeframe": tf,
+        "timeframe_source": timeframe_source,
         "detected_timeframes": detected, "status": raw["status"],
         "image_size": raw.get("image_size"), "ocr_text": text,
         "numeric_tokens": [{"text": t["text"], "value": _num(t["text"]),
@@ -207,11 +216,20 @@ def table18_template(reference_price: float | None = None) -> dict[str, Any]:
 
 
 def build_visual_audit(images: dict[str, str | Path], output: str | Path | None = None) -> dict[str, Any]:
-    charts = {tf.upper(): audit_chart(path, tf) for tf, path in images.items()}
+    charts = {str(label): audit_chart(path, str(label)) for label, path in images.items()}
+    observed = [chart.get("timeframe") for chart in charts.values() if chart.get("timeframe")]
+    duplicates = sorted({tf for tf in observed if observed.count(tf) > 1})
+    missing = [tf for tf in TIMEFRAMES if tf not in observed]
     # No artificial synchronization: preserve each chart's own source and time labels.
     report = {
         "version": VERSION, "mode": "READ_ONLY_RESEARCH_ONLY",
         "charts": charts, "table18": table18_template(),
+        "visual_timeframe_audit": {
+            "observed_timeframes": observed,
+            "missing_timeframes": missing,
+            "duplicate_timeframes": duplicates,
+            "status": "COMPLETE_SET" if not missing and not duplicates else "INCOMPLETE_OR_DUPLICATED",
+        },
         "mtf_synchronization": "NOT_VERIFIED_FROM_SCREENSHOTS",
         "decision": "NO_TRADE",
         "reason": "Visual extraction is contextual evidence only; no closed OHLC, timestamp alignment, verified costs or OOS statistics supplied.",
