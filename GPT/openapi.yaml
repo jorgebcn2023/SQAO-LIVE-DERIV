@@ -1,22 +1,22 @@
 openapi: 3.1.0
 info:
   title: SQAO Live Deriv API
-  version: 2.5.0
+  version: 2.6.0
   description: >-
-    Read-only live Deriv Step Index API. Snapshot includes closed D1, H4, H1,
-    M15, M5 and M1 candles and the canonical v23 research detector. The endpoint
-    enforces the fail-closed V2.5 MTF synchronization gate and NO_TRADE until all-in costs and OOS eligibility are verified. No trading operations are exposed.
+    Read-only Deriv Step Index API. Snapshot includes closed D1/H4/H1/M15/M5/M1
+    candles, MTF synchronization and data integrity gates. Decisions remain
+    NO_TRADE and execution_eligible=false until all-in costs and chronological
+    out-of-sample eligibility are independently verified. No trading operations.
 servers:
   - url: https://sqao-live-api-v2.onrender.com
 paths:
   /health:
     get:
       operationId: health
-      summary: Check API, connector task and market-data freshness
-      security: []
+      summary: Check API, connector and market-data freshness
       responses:
         '200':
-          description: Service state and data freshness for all required timeframes
+          description: Service state and freshness by timeframe
           content:
             application/json:
               schema:
@@ -24,83 +24,49 @@ paths:
                 properties:
                   status: {type: string, enum: [ok, degraded]}
                   service: {type: string}
-                  version: {type: string}
+                  version: {type: string, example: "2.6.0"}
+                  mtf_sync_version: {type: string}
+                  required_timeframes:
+                    type: array
+                    items: {type: string}
                   read_only: {type: boolean}
-                  background_connector_enabled: {type: boolean}
                   background_connector_running: {type: boolean}
-                  background_connector_started_at_utc: {type: string, nullable: true}
-                  background_connector_error: {type: string, nullable: true}
-                  market_data:
-                    type: object
-                    properties:
-                      max_data_age_seconds: {type: integer}
-                      all_timeframes_fresh: {type: boolean}
-                      timeframes:
-                        type: object
+                  market_data: {type: object}
   /market/active-symbols:
     get:
       operationId: getActiveStepSymbols
-      summary: List active Deriv Step Index symbols
+      summary: Discover active Step Index symbols from Deriv
       responses:
         '200':
-          description: Active Step Index symbols
-          content:
-            application/json:
-              schema:
-                type: object
+          description: Active symbols from Deriv public market data
   /market/ohlc:
     get:
       operationId: getStepOHLC
-      summary: Get recent OHLC candles from Deriv
+      summary: Retrieve fully closed, validated OHLC candles
       parameters:
-        - name: symbol
-          in: query
-          required: false
-          schema: {type: string, default: AUTO}
-        - name: timeframe
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [M1, M5, M15, H1, H4, D1]
-            default: M1
-        - name: count
-          in: query
-          required: false
-          schema: {type: integer, minimum: 20, maximum: 500, default: 500}
+        - {name: symbol, in: query, schema: {type: string, default: AUTO}}
+        - {name: timeframe, in: query, schema: {type: string, enum: [M1, M5, M15, H1, H4, D1], default: M1}}
+        - {name: count, in: query, schema: {type: integer, minimum: 20, maximum: 500, default: 500}}
       responses:
         '200':
-          description: OHLC candles
-          content:
-            application/json:
-              schema:
-                type: object
+          description: Timestamped closed OHLC candles
         '502':
           description: Deriv upstream error or insufficient market data
   /analysis/snapshot:
     get:
       operationId: getSQAOQuantSnapshot
-      summary: Get complete live multi-timeframe analysis
+      summary: Retrieve the complete six-timeframe SQAO audit
       description: >-
-        Resolves symbol=AUTO against active Step Index symbols, retrieves closed
-        D1/H4/H1/M15/M5/M1 candles, aligns H4/H1/M15/M5/M1 at the latest closed M1
-        decision boundary, and evaluates the canonical v23 detector. Decision is
-        forced to NO_TRADE when MTF synchronization is blocked and while costs and OOS eligibility remain unverified. The response includes mtf_sync_gate.
+        Resolves AUTO against active Step Index symbols; returns closed candles,
+        data_quality, mtf_sync_gate and integrity_gate. A candidate is reviewable
+        only when the technical setup, MTF synchronization and data integrity
+        gates pass. This is not execution authorization. NO_TRADE is enforced
+        while all-in costs and OOS eligibility remain unverified.
       parameters:
-        - name: symbol
-          in: query
-          required: false
-          schema: {type: string, default: AUTO}
-        - name: count
-          in: query
-          required: false
-          schema: {type: integer, minimum: 20, maximum: 500, default: 500}
+        - {name: symbol, in: query, schema: {type: string, default: AUTO}}
+        - {name: count, in: query, schema: {type: integer, minimum: 20, maximum: 500, default: 500}}
       responses:
         '200':
-          description: Live MTF quantitative snapshot
-          content:
-            application/json:
-              schema:
-                type: object
+          description: Read-only MTF research snapshot
         '502':
           description: Deriv upstream error or insufficient candles
