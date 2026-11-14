@@ -51,11 +51,11 @@ El resultado se guarda como artifact `sqao-synthetic-research-*` durante 14 día
 
 Backend Render:
 
-`https://sqao-live-api.onrender.com`
+`https://sqao-live-api-v2.onrender.com` (servicio canónico V2; despliegue Render `sqao-live-api-v2`)
 
 Endpoints principales:
 
-- `/health`
+- `/health` (estado HTTP, conector y frescura por temporalidad)
 - `/market/active-symbols`
 - `/market/ohlc?symbol=AUTO&timeframe=M1&count=120`
 - `/analysis/snapshot?symbol=AUTO&count=120`
