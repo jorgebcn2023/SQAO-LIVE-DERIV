@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: SQAO Live Deriv API
-  version: 2.4.4-rc1
+  version: 2.5.0
   description: >-
     Read-only live Deriv Step Index API. Snapshot includes closed D1, H4, H1,
     M15, M5 and M1 candles and the canonical v23 research detector. The endpoint
-    enforces NO_TRADE until all-in costs and OOS eligibility are verified. No trading operations are exposed.
+    enforces the fail-closed V2.5 MTF synchronization gate and NO_TRADE until all-in costs and OOS eligibility are verified. No trading operations are exposed.
 servers:
   - url: https://sqao-live-api-v2.onrender.com
 paths:
@@ -85,7 +85,7 @@ paths:
         Resolves symbol=AUTO against active Step Index symbols, retrieves closed
         D1/H4/H1/M15/M5/M1 candles, aligns H4/H1/M15/M5/M1 at the latest closed M1
         decision boundary, and evaluates the canonical v23 detector. Decision is
-        forced to NO_TRADE while costs and OOS eligibility remain unverified.
+        forced to NO_TRADE when MTF synchronization is blocked and while costs and OOS eligibility remain unverified. The response includes mtf_sync_gate.
       parameters:
         - name: symbol
           in: query

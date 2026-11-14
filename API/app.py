@@ -13,6 +13,7 @@ import websockets
 from fastapi import FastAPI, Header, HTTPException, Query
 
 from ENGINE.live_pipeline import timeframe_snapshot
+from ENGINE.mtf_sync import VERSION as MTF_SYNC_VERSION, audit_mtf_synchronization
 
 DERIV_WS = os.getenv("DERIV_PUBLIC_WS", "wss://api.derivws.com/trading/v1/options/ws/public")
 API_KEY = os.getenv("SQAO_ACTION_KEY", "").strip()
@@ -21,7 +22,7 @@ GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 8
 RUN_CONNECTOR = os.getenv("SQAO_RUN_CONNECTOR", "true").strip().lower() in {"1", "true", "yes", "on"}
 DATA_DIR = Path(os.getenv("SQAO_DATA_DIR", "DATA"))
 
-app = FastAPI(title="SQAO Live API", version="2.4.4-rc1", docs_url="/docs", redoc_url="/redoc")
+app = FastAPI(title="SQAO Live API", version="2.5.0", docs_url="/docs", redoc_url="/redoc")
 _connector_task: asyncio.Task | None = None
 _connector_started_at: str | None = None
 
@@ -301,6 +302,12 @@ async def analysis_snapshot(
         setup = {"state": "INSUFFICIENT_DATA", "confirmed": False}
 
     context = {tf: _frame_context(rows) for tf, rows in frames.items()}
+    generated_at = datetime.now(timezone.utc)
+    mtf_sync_gate = audit_mtf_synchronization({
+        "generated_at_utc": generated_at.isoformat(),
+        "timeframes": context,
+    })
+    mtf_sync_passed = mtf_sync_gate["status"] == "PASS"
     data_quality = {}
     for tf, rows in frames.items():
         epochs = [int(row["epoch"]) for row in rows]
@@ -321,7 +328,10 @@ async def analysis_snapshot(
     # This endpoint is a research detector. Unverified all-in execution costs
     # block any validated or executable recommendation.
     return {
-        "api_version": "2.4.4-rc1",
+        "api_version": "2.5.0",
+        "mtf_sync_version": MTF_SYNC_VERSION,
+        "mtf_sync_gate": mtf_sync_gate,
+        "mtf_sync_passed": mtf_sync_passed,
         "engine": "SQAO_STEP_INDEX_V23_CANONICAL",
         "symbol": resolved,
         "symbol_resolution": mode,
@@ -329,7 +339,7 @@ async def analysis_snapshot(
         "read_only": True,
         "decision": "NO_TRADE",
         "candidate_setup": setup,
-        "candidate_confirmed": bool(setup.get("confirmed")),
+        "candidate_confirmed": bool(setup.get("confirmed")) and mtf_sync_passed,
         "execution_eligible": False,
         "cost_gate": "BLOCKED_MISSING_VERIFIABLE_ALL_IN_COST",
         "decision_epoch": decision_epoch,
@@ -339,6 +349,6 @@ async def analysis_snapshot(
         "data_quality": data_quality,
         "timeframes": context,
         "candles": frames,
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": generated_at.isoformat(),
         "note": "Canonical v23 trigger is research-only. NO_TRADE is enforced until all-in costs and out-of-sample eligibility are independently verified.",
     }

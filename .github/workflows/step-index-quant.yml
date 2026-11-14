@@ -30,6 +30,8 @@ on:
       - 'ENGINE/requirements.txt'
       - 'API/app.py'
       - 'API/test_app.py'
+      - 'ENGINE/mtf_sync.py'
+      - 'ENGINE/test_mtf_sync.py'
       - 'GPT/openapi.yaml'
       - '.github/workflows/step-index-quant.yml'
 
@@ -65,7 +67,8 @@ jobs:
 
       - name: Compile and test
         run: |
-          python -m compileall -q ENGINE
+          python -m compileall -q ENGINE API
+          python -m ENGINE.test_mtf_sync
           python -m ENGINE.test_step_index_quant
           python -m ENGINE.test_table18_full_audit
           python -m ENGINE.test_step_index_mt5_cost_audit
