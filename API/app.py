@@ -276,6 +276,28 @@ def _frame_context(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return timeframe_snapshot(normalized)
 
 
+def _build_integrity_gate(
+    mtf_sync_gate: dict[str, Any],
+    data_complete: bool,
+    setup: dict[str, Any],
+) -> dict[str, Any]:
+    """Combine independent MTF, sample-depth and signal-window integrity checks."""
+    blockers: list[str] = []
+    if mtf_sync_gate.get("status") != "PASS":
+        blockers.extend(mtf_sync_gate.get("blockers") or ["MTF_SYNC_BLOCKED"])
+    if not data_complete:
+        blockers.append("INSUFFICIENT_ALIGNED_CLOSED_CANDLES")
+    if setup.get("state") == "DATA_GAP_BLOCK":
+        blockers.append("NON_CONTIGUOUS_SIGNAL_WINDOW")
+    blockers = sorted(set(blockers))
+    return {
+        "status": "PASS" if not blockers else "BLOCKED",
+        "candidate_review_allowed": bool(setup.get("confirmed")) and not blockers,
+        "blockers": blockers,
+        "policy": "A candidate can be reviewed only when MTF timestamps, aligned sample depth and signal-window continuity pass. This does not authorize execution.",
+    }
+
+
 @app.get("/analysis/snapshot")
 async def analysis_snapshot(
     symbol: str = Query(default="AUTO", description="Deriv Step Index symbol; AUTO autodetects an active Step Index"),
@@ -329,19 +351,7 @@ async def analysis_snapshot(
 
     data_complete = all(len(aligned[tf]) >= required for tf, required in
                          {"M1": 40, "M5": 40, "M15": 30, "H1": 30, "H4": 30}.items())
-    integrity_blockers = []
-    if not mtf_sync_passed:
-        integrity_blockers.extend(mtf_sync_gate.get("blockers", ["MTF_SYNC_BLOCKED"]))
-    if not data_complete:
-        integrity_blockers.append("INSUFFICIENT_ALIGNED_CLOSED_CANDLES")
-    if setup.get("state") == "DATA_GAP_BLOCK":
-        integrity_blockers.append("NON_CONTIGUOUS_SIGNAL_WINDOW")
-    integrity_gate = {
-        "status": "PASS" if not integrity_blockers else "BLOCKED",
-        "candidate_review_allowed": bool(setup.get("confirmed")) and not integrity_blockers,
-        "blockers": sorted(set(integrity_blockers)),
-        "policy": "A candidate can be reviewed only when MTF timestamps, aligned sample depth and signal-window continuity pass. This does not authorize execution."
-    }
+    integrity_gate = _build_integrity_gate(mtf_sync_gate, data_complete, setup)
 
     # This endpoint is research-only. Costs/OOS are not certified by live signal confirmation.
     return {
