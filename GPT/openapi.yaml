@@ -93,7 +93,7 @@ paths:
         - name: count
           in: query
           required: false
-          schema: {type: integer, minimum: 20, maximum: 500, default: 120}
+          schema: {type: integer, minimum: 20, maximum: 500, default: 500}
       responses:
         '200':
           description: Live MTF quantitative snapshot
