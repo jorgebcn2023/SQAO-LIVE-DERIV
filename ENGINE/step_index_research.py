@@ -305,11 +305,16 @@ def backtest_m5(
             "risk_price": risk, "gross_r": gross_r, "cost_r": cost_r, "net_r": net_r,
             "exit_reason": exit_reason, "exit_epoch": int(m5[j]["epoch"]),
             "holding_bars": j - i, "sample": "train" if i < split else "out_of_sample",
-            "indicator_snapshots_at_signal": {
+            # Per-trade full-history indicator snapshots are expensive on large OHLC
+            # samples. The report already contains a complete MTF snapshot; enable
+            # this verbose per-trade trace only when explicitly requested.
+            "indicator_snapshots_at_signal": ({
                 tf: chart_indicator_snapshot([row for row in (all_frames or {}).get(tf, [])
                     if int(row["epoch"]) + GRANULARITY[tf] <= decision_epoch])
                 for tf in ("D1", *CHART_TIMEFRAMES)
-            } if all_frames is not None else {},
+            } if all_frames is not None else {}) if os.getenv(
+                "SQAO_INCLUDE_TRADE_INDICATOR_SNAPSHOTS", "0"
+            ).strip().lower() in {"1", "true", "yes"} else {},
         })
         next_allowed = last_j + 1
     train = [x for x in trades if x["sample"] == "train"]
@@ -685,6 +690,12 @@ async def run_research() -> dict[str, Any]:
         "historical_eligibility": historical_gate,
         "methodology": "chronological 70/30 holdout; fixed parameters; no parameter optimization; entry at next M5 open; stop first on same-bar conflict; four descriptive chronological holdout subperiods",
         "data_counts": {tf: len(rows) for tf, rows in frames.items()},
+        "diagnostics": {
+            "per_trade_indicator_snapshots_enabled": os.getenv(
+                "SQAO_INCLUDE_TRADE_INDICATOR_SNAPSHOTS", "0"
+            ).strip().lower() in {"1", "true", "yes"},
+            "performance_note": "Full MTF indicator snapshots are always present at report level; repeating the full indicator audit inside every trade is opt-in to avoid quadratic work on large histories."
+        },
         "limitations": ["A 70% target is not guaranteed.", "Out-of-sample history is not a prediction for the next trade.",
                         "The rule is a fixed baseline; results need independent rolling walk-forward confirmation.",
                         "Cost-adjusted eligibility is blocked unless realistic round-trip cost is provided.",

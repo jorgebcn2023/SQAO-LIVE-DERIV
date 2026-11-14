@@ -34,7 +34,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: sqao-step-index-quant
+  # Isolate runs by Git ref: an older research run on another branch must not
+  # hold the global lock and leave the current PR validation permanently pending.
+  group: sqao-step-index-quant-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -95,6 +97,7 @@ jobs:
           SQAO_STEP_MIN_OOS_TRADES: '100'
           SQAO_STEP_TARGET_WIN_RATE: '0.70'
           SQAO_STEP_ROUND_TRIP_COST_PRICE: ${{ vars.SQAO_STEP_ROUND_TRIP_COST_PRICE }}
+          SQAO_INCLUDE_TRADE_INDICATOR_SNAPSHOTS: '0'
           SQAO_DATA_DIR: DATA
         run: python -m ENGINE.step_index_research
 
