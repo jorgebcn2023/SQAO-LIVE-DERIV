@@ -2,6 +2,12 @@ name: SQAO Step Index Quant Research
 
 on:
   workflow_dispatch:
+    inputs:
+      deriv_step_name:
+        description: "Exact Deriv Step Index symbol code or exact display name; leave blank to inspect candidates and fail closed if ambiguous"
+        required: false
+        type: string
+        default: ""
   pull_request:
     branches: [main]
   schedule:
@@ -38,6 +44,8 @@ concurrency:
 jobs:
   step-index-quant:
     runs-on: ubuntu-latest
+    env:
+      DERIV_STEP_NAME: ${{ inputs.deriv_step_name }}
     timeout-minutes: 35
     steps:
       - name: Checkout repository
