@@ -110,7 +110,6 @@ jobs:
       - name: Run ARIMA and 10,000-path Monte Carlo
         env:
           DERIV_PUBLIC_WS: wss://api.derivws.com/trading/v1/options/ws/public
-          SQAO_ARIMA_SYMBOL: stpRNG
           SQAO_ARIMA_CANDLES: '5000'
           SQAO_ARIMA_GRANULARITY: '300'
           SQAO_ARIMA_HORIZON: '5'
