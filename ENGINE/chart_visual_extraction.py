@@ -21,7 +21,24 @@ INDICATORS = ("EMA 9", "EMA 20", "EMA 50", "Bollinger 20,2",
               "+DI 14", "-DI 14", "Stochastic 14,3,3")
 
 NUM_RE = re.compile(r"(?<![A-Za-z])[-+]?\d{1,7}(?:[.,]\d+)?")
-TF_RE = re.compile(r"\b(D1|H4|H1|M15|M5|M1)\b", re.I)
+TF_RE = re.compile(r"\b(D1|DAILY|1D|H4|4HOUR|4H|H1|1H|60M|M15|15M|M5|5M|M1|1M)\b", re.I)
+
+
+def _normalize_timeframe(value: str | None) -> str | None:
+    if not value:
+        return None
+    aliases = {
+        "D1": "D1", "DAILY": "D1", "1D": "D1",
+        "H4": "H4", "4H": "H4", "4HOUR": "H4",
+        "H1": "H1", "1H": "H1", "60M": "H1",
+        "M15": "M15", "15M": "M15",
+        "M5": "M5", "5M": "M5",
+        "M1": "M1", "1M": "M1",
+    }
+    for match in TF_RE.findall(str(value).upper()):
+        if match.upper() in aliases:
+            return aliases[match.upper()]
+    return aliases.get(str(value).strip().upper())
 MACD_RE = re.compile(r"MACD\s*\(\s*12\s*,\s*26\s*,\s*9\s*\)\s*([-+]?\d+[.,]\d+)\s*([-+]?\d+[.,]\d+)", re.I)
 
 
