@@ -17,15 +17,28 @@ from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
 
 WS=os.getenv("DERIV_PUBLIC_WS","wss://api.derivws.com/trading/v1/options/ws/public")
-SYMBOL=os.getenv("SQAO_ARIMA_SYMBOL","stpRNG")
+SYMBOL=""
+SYMBOL_INFO: dict[str, object] = {}
 DATA=Path(os.getenv("SQAO_DATA_DIR","DATA")); DATA.mkdir(parents=True,exist_ok=True)
 N_SIM=int(os.getenv("SQAO_MC_PATHS","10000"))
 COUNT=int(os.getenv("SQAO_ARIMA_CANDLES","5000"))
 HORIZON=int(os.getenv("SQAO_ARIMA_HORIZON","5"))
 GRAN=int(os.getenv("SQAO_ARIMA_GRANULARITY","300"))
 
-async def fetch_candles():
-    req={"ticks_history":SYMBOL,"end":"latest","count":COUNT,"style":"candles","granularity":GRAN,"req_id":1}
+async def resolve_symbol():
+    from .deriv_symbols import select_step_index_symbol
+    async with websockets.connect(WS,open_timeout=20,close_timeout=5) as ws:
+        req={"active_symbols":"brief","req_id":9001}
+        await ws.send(json.dumps(req))
+        while True:
+            msg=json.loads(await asyncio.wait_for(ws.recv(),timeout=30))
+            if msg.get("req_id")==9001:
+                if msg.get("error"): raise RuntimeError(msg["error"].get("message","Deriv API error"))
+                return select_step_index_symbol(msg.get("active_symbols",[]) or [], requested=os.getenv("SQAO_ARIMA_SYMBOL", ""))
+            if msg.get("error"): raise RuntimeError(msg["error"].get("message","Deriv API error"))
+
+async def fetch_candles(symbol: str):
+    req={"ticks_history":symbol,"end":"latest","count":COUNT,"style":"candles","granularity":GRAN,"req_id":1}
     async with websockets.connect(WS,open_timeout=20,close_timeout=5) as ws:
         await ws.send(json.dumps(req))
         while True:
@@ -48,8 +61,11 @@ async def fetch_candles():
     return rows
 
 def main():
+    global SYMBOL, SYMBOL_INFO
     import pandas as pd
-    rows=asyncio.run(fetch_candles())
+    SYMBOL_INFO=asyncio.run(resolve_symbol())
+    SYMBOL=str(SYMBOL_INFO["symbol"])
+    rows=asyncio.run(fetch_candles(SYMBOL))
     df=pd.DataFrame(rows); close=df.close.to_numpy(float)
     lr=np.diff(np.log(close)); n=len(lr)
     split=int(n*.8); train,test=lr[:split],lr[split:]
@@ -98,7 +114,7 @@ def main():
     direction_signal="LONG" if forecast_price>last else "SHORT" if forecast_price<last else "WAIT"
     decision=direction_signal if arima_better and max(up,down)>=.60 else "NO_TRADE"
     ts=datetime.now(timezone.utc).isoformat()
-    report={"generated_at_utc":ts,"symbol":SYMBOL,"timeframe":f"M{GRAN//60}" if GRAN<3600 else f"H{GRAN//3600}","candles_closed":len(rows),"last_epoch":int(df.epoch.iloc[-1]),"last_close":last,"horizon_candles":HORIZON,"arima":{"order":[p,0,q],"aic":float(final_fit.aic),"adf_pvalue_train":adf_p,"oos_n":len(test),"oos_rmse":rmse,"zero_return_rmse":baseline,"oos_mae":mae,"directional_accuracy":direction,"beats_zero_return_rmse":arima_better,"forecast_log_returns":mean_lr.tolist(),"forecast_price_compounded":forecast_price,"log_return_volatility":vol,"mean_log_return":drift,"forecast_ci_log_return":ci.tolist()},"monte_carlo":{"paths":N_SIM,"method":"iid bootstrap of historical closed-candle log returns; empirical distribution","probability_terminal_up":up,"probability_terminal_down":down,"terminal_price_p05":q05,"terminal_price_median":q50,"terminal_price_p95":q95,"max_drawdown_5th_percentile":dd95},"decision":decision,"limitations":["Monte Carlo probabilities are historical-bootstrap scenario frequencies, not calibrated win probabilities.","ARIMA forecast is not a trading signal unless it beats the zero-return OOS benchmark.","No spread/slippage/commission included; do not infer 70% trading effectiveness.","Read-only research; no order placement."]}
+    report={"generated_at_utc":ts,"symbol":SYMBOL_INFO,"timeframe":f"M{GRAN//60}" if GRAN<3600 else f"H{GRAN//3600}","candles_closed":len(rows),"last_epoch":int(df.epoch.iloc[-1]),"last_close":last,"horizon_candles":HORIZON,"arima":{"order":[p,0,q],"aic":float(final_fit.aic),"adf_pvalue_train":adf_p,"oos_n":len(test),"oos_rmse":rmse,"zero_return_rmse":baseline,"oos_mae":mae,"directional_accuracy":direction,"beats_zero_return_rmse":arima_better,"forecast_log_returns":mean_lr.tolist(),"forecast_price_compounded":forecast_price,"log_return_volatility":vol,"mean_log_return":drift,"forecast_ci_log_return":ci.tolist()},"monte_carlo":{"paths":N_SIM,"method":"iid bootstrap of historical closed-candle log returns; empirical distribution","probability_terminal_up":up,"probability_terminal_down":down,"terminal_price_p05":q05,"terminal_price_median":q50,"terminal_price_p95":q95,"max_drawdown_5th_percentile":dd95},"decision":decision,"limitations":["Monte Carlo probabilities are historical-bootstrap scenario frequencies, not calibrated win probabilities.","ARIMA forecast is not a trading signal unless it beats the zero-return OOS benchmark.","No spread/slippage/commission included; do not infer 70% trading effectiveness.","Read-only research; no order placement."]}
     (DATA/"step_index_arima_mc.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
     fig,ax=plt.subplots(figsize=(9,4.5))
     for i in range(min(100,N_SIM)): ax.plot(range(HORIZON+1),np.r_[last,paths[i]],alpha=.12,linewidth=.6)

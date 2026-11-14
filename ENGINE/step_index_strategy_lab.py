@@ -235,8 +235,8 @@ def build_table18(report: dict[str, Any]) -> dict[str, Any]:
         blockers.append("COSTES_REALES_NO_CONFIGURADOS")
     return {
         "table": 18,
-        "instrument": "Step Index 100",
-        "symbol": report.get("symbol", {}).get("symbol", "stpRNG"),
+        "instrument": report.get("symbol", {}).get("display_name", "Step Index (variant unresolved)"),
+        "symbol": report.get("symbol", {}).get("symbol"),
         "selection": "Mayor efectividad observada OOS entre las estrategias predefinidas; desempate por expectativa y PF",
         "strategy": strategy,
         "historical_oos": {

@@ -218,8 +218,8 @@ def build_table17(live_path, gross_oos, net_oos, cost_status, eligibility):
             }
     return {
         "table": 17,
-        "instrument": "Step Index 100",
-        "deriv_symbol": live.get("symbol", {}).get("symbol", "stpRNG"),
+        "instrument": live.get("symbol", {}).get("display_name", "Step Index (variant unresolved)"),
+        "deriv_symbol": live.get("symbol", {}).get("symbol"),
         "decision": "CONDITIONAL_SETUP_REQUIRES_LIVE_CONFIRMATION" if confirmed else "NO_TRADE",
         "signal_confirmed": bool(setup.get("confirmed")),
         "execution_price_confirmed": confirmed,

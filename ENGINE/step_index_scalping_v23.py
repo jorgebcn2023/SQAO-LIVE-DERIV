@@ -87,22 +87,13 @@ async def fetch_candles(ws, symbol, tf, count, req_id, page_size=1000):
 
 
 async def market():
+    try:
+        from .deriv_symbols import select_step_index_symbol
+    except ImportError:  # direct execution as python ENGINE/step_index_scalping_v23.py
+        from deriv_symbols import select_step_index_symbol
     async with websockets.connect(WS,open_timeout=20,ping_interval=20) as ws:
         d=await req(ws,{"active_symbols":"brief","req_id":1})
-    # Deriv current schema uses underlying_symbol/name; retain legacy fallbacks.
-    raw_symbols=d.get("active_symbols",[])
-    symbols=[]
-    for item in raw_symbols:
-        code=str(item.get("underlying_symbol") or item.get("symbol") or "").strip()
-        name=str(item.get("underlying_symbol_name") or item.get("display_name") or "").strip()
-        if code and "step index" in (name+" "+code).lower():
-            symbols.append({"symbol":code,"name":name or code})
-    if not symbols:
-        sample=[{"code":str(x.get("underlying_symbol") or x.get("symbol") or ""),
-                 "name":str(x.get("underlying_symbol_name") or x.get("display_name") or "")}
-                for x in raw_symbols[:12]]
-        raise RuntimeError(f"Deriv active_symbols returned {len(raw_symbols)} symbols but no Step Index match; sample={sample}")
-    sym=next((x for x in symbols if x["name"].lower()=="step index"),symbols[0])
+    sym=select_step_index_symbol(d.get("active_symbols",[]) or [])
     requested={"M1":int(os.getenv("SQAO_SCALP_CANDLES_M1","20000")),"M5":int(os.getenv("SQAO_SCALP_CANDLES_M5","20000")),"M15":int(os.getenv("SQAO_SCALP_CANDLES_M15","7000")),"H1":int(os.getenv("SQAO_SCALP_CANDLES_H1","2500")),"H4":int(os.getenv("SQAO_SCALP_CANDLES_H4","1000"))}
     frames={}
     async with websockets.connect(WS,open_timeout=20,ping_interval=20) as ws:
