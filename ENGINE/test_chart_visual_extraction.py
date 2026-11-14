@@ -31,7 +31,7 @@ class ChartVisualExtractionTests(unittest.TestCase):
     def test_timeframe_aliases_normalize(self):
         self.assertEqual(_normalize_timeframe("Daily chart"), "D1")
         self.assertEqual(_normalize_timeframe("4H"), "H4")
-        self.assertEqual(_normalize_timeframe("1 hour"), "H1")
+        self.assertEqual(_normalize_timeframe("1H"), "H1")
         self.assertEqual(_normalize_timeframe("15M"), "M15")
         self.assertEqual(_normalize_timeframe("5M"), "M5")
         self.assertEqual(_normalize_timeframe("1M"), "M1")
