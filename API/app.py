@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -11,16 +12,16 @@ from typing import Any
 import websockets
 from fastapi import FastAPI, Header, HTTPException, Query
 
-from ENGINE.live_pipeline import analyze_rows
+from ENGINE.live_pipeline import timeframe_snapshot
 
 DERIV_WS = os.getenv("DERIV_PUBLIC_WS", "wss://api.derivws.com/trading/v1/options/ws/public")
 API_KEY = os.getenv("SQAO_ACTION_KEY", "").strip()
-TIMEFRAMES = ("D1", "H1", "M15", "M5", "M1")
-GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "D1": 86400}
+TIMEFRAMES = ("D1", "H4", "H1", "M15", "M5", "M1")
+GRANULARITY = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 86400}
 RUN_CONNECTOR = os.getenv("SQAO_RUN_CONNECTOR", "true").strip().lower() in {"1", "true", "yes", "on"}
 DATA_DIR = Path(os.getenv("SQAO_DATA_DIR", "DATA"))
 
-app = FastAPI(title="SQAO Live API", version="2.2.0", docs_url="/docs", redoc_url="/redoc")
+app = FastAPI(title="SQAO Live API", version="2.4.4-rc1", docs_url="/docs", redoc_url="/redoc")
 _connector_task: asyncio.Task | None = None
 _connector_started_at: str | None = None
 
@@ -195,48 +196,149 @@ async def active_symbols(x_sqao_key: str | None = Header(default=None, alias="X-
 @app.get("/market/ohlc")
 async def ohlc(
     symbol: str = Query(default="AUTO", description="Deriv Step Index symbol; AUTO resolves an active Step Index"),
-    timeframe: str = Query(default="M1", pattern="^(M1|M5|M15|H1|D1)$"),
-    count: int = Query(default=120, ge=20, le=500),
+    timeframe: str = Query(default="M1", pattern="^(M1|M5|M15|H1|H4|D1)$"),
+    count: int = Query(default=500, ge=20, le=500),
     x_sqao_key: str | None = Header(default=None, alias="X-SQAO-Key"),
 ):
     _check_auth(x_sqao_key)
     resolved, mode = await _resolve_symbol(symbol)
-    candles = await _candles(resolved, timeframe, count)
+    raw_candles = await _candles(resolved, timeframe, count)
+    candles = _closed_candles(raw_candles, timeframe)
     if not candles:
-        raise HTTPException(status_code=502, detail=f"No candles returned for {resolved} {timeframe}")
+        raise HTTPException(status_code=502, detail=f"No completed valid candles returned for {resolved} {timeframe}")
     return {
         "symbol": resolved,
         "symbol_resolution": mode,
         "timeframe": timeframe,
         "granularity_seconds": GRANULARITY[timeframe],
         "count": len(candles),
+        "latest_closed_epoch": candles[-1]["epoch"],
+        "latest_closed_utc": datetime.fromtimestamp(candles[-1]["epoch"], timezone.utc).isoformat(),
         "candles": candles,
         "source": "Deriv public market data",
         "read_only": True,
     }
 
 
+def _closed_candles(candles: list[dict[str, Any]], timeframe: str) -> list[dict[str, Any]]:
+    """Normalize, deduplicate and retain only valid fully closed Deriv candles."""
+    now = int(datetime.now(timezone.utc).timestamp())
+    granularity = GRANULARITY[timeframe]
+    unique: dict[int, dict[str, Any]] = {}
+    for candle in candles:
+        try:
+            epoch = int(candle["epoch"])
+            values = {key: float(candle[key]) for key in ("open", "high", "low", "close")}
+            if epoch + granularity > now:
+                continue
+            if not all(math.isfinite(value) for value in values.values()):
+                continue
+            if values["high"] < max(values["open"], values["close"], values["low"]):
+                continue
+            if values["low"] > min(values["open"], values["close"], values["high"]):
+                continue
+            unique[epoch] = {"epoch": epoch, **values}
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+    return [unique[epoch] for epoch in sorted(unique)]
+
+
+async def _current_m1_open(symbol: str) -> dict[str, Any] | None:
+    """Read only the forming M1 candle open for exact next-bar matching."""
+    data = await _deriv_request({
+        "ticks_history": symbol,
+        "end": "latest",
+        "count": 1,
+        "style": "candles",
+        "granularity": GRANULARITY["M1"],
+        "req_id": 19001,
+    })
+    rows = data.get("candles", []) or []
+    if not rows:
+        return None
+    try:
+        row = rows[-1]
+        epoch = int(row["epoch"])
+        price = float(row["open"])
+        now = int(datetime.now(timezone.utc).timestamp())
+        if not math.isfinite(price) or price <= 0 or not (epoch <= now < epoch + 60):
+            return None
+        return {"epoch": epoch, "open": price, "source": "Deriv current M1 candle open"}
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def _frame_context(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    normalized = [{key: str(value) for key, value in row.items()} for row in rows]
+    return timeframe_snapshot(normalized)
+
+
 @app.get("/analysis/snapshot")
 async def analysis_snapshot(
     symbol: str = Query(default="AUTO", description="Deriv Step Index symbol; AUTO autodetects an active Step Index"),
-    count: int = Query(default=120, ge=20, le=500),
+    count: int = Query(default=500, ge=20, le=500),
     x_sqao_key: str | None = Header(default=None, alias="X-SQAO-Key"),
 ):
     _check_auth(x_sqao_key)
+    from ENGINE.step_index_scalping_v23 import TF, detect, synchronize_frames
+
     resolved, mode = await _resolve_symbol(symbol)
     frames: dict[str, list[dict[str, Any]]] = {}
     for tf in TIMEFRAMES:
-        frames[tf] = await _candles(resolved, tf, count)
-        if len(frames[tf]) < 20:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Insufficient candles for {tf}: received {len(frames[tf])}, expected at least 20",
-            )
-    analysis = analyze_rows({tf: [{k: str(v) for k, v in row.items()} for row in rows] for tf, rows in frames.items()})
-    analysis["symbol"] = resolved
-    analysis["symbol_resolution"] = mode
-    analysis["source"] = "Deriv public market data"
-    analysis["read_only"] = True
-    analysis["candles"] = frames
-    analysis["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
-    return analysis
+        raw = await _candles(resolved, tf, count)
+        frames[tf] = _closed_candles(raw, tf)
+
+    detector_frames = {tf: frames[tf] for tf in ("M1", "M5", "M15", "H1", "H4")}
+    if frames["M1"]:
+        decision_epoch = int(frames["M1"][-1]["epoch"]) + TF["M1"]
+        aligned = synchronize_frames(detector_frames, decision_epoch)
+        next_open = await _current_m1_open(resolved)
+        setup = detect(aligned, next_open=next_open)
+    else:
+        decision_epoch = None
+        aligned = {tf: [] for tf in detector_frames}
+        next_open = None
+        setup = {"state": "INSUFFICIENT_DATA", "confirmed": False}
+
+    context = {tf: _frame_context(rows) for tf, rows in frames.items()}
+    data_quality = {}
+    for tf, rows in frames.items():
+        epochs = [int(row["epoch"]) for row in rows]
+        gaps = [(b - a) // GRANULARITY[tf] for a, b in zip(epochs, epochs[1:])
+                if b - a > GRANULARITY[tf]]
+        latest = epochs[-1] if epochs else None
+        data_quality[tf] = {
+            "requested": count,
+            "received_closed": len(rows),
+            "shortfall": max(0, count - len(rows)),
+            "duplicate_epochs_removed": True,
+            "gap_count": len(gaps),
+            "max_gap_bars": max(gaps, default=1),
+            "latest_closed_epoch": latest,
+            "latest_closed_utc": datetime.fromtimestamp(latest, timezone.utc).isoformat() if latest is not None else None,
+        }
+
+    # This endpoint is a research detector. Unverified all-in execution costs
+    # block any validated or executable recommendation.
+    return {
+        "api_version": "2.4.4-rc1",
+        "engine": "SQAO_STEP_INDEX_V23_CANONICAL",
+        "symbol": resolved,
+        "symbol_resolution": mode,
+        "source": "Deriv public market data",
+        "read_only": True,
+        "decision": "NO_TRADE",
+        "candidate_setup": setup,
+        "candidate_confirmed": bool(setup.get("confirmed")),
+        "execution_eligible": False,
+        "cost_gate": "BLOCKED_MISSING_VERIFIABLE_ALL_IN_COST",
+        "decision_epoch": decision_epoch,
+        "next_m1_open": next_open,
+        "data_complete": all(len(aligned[tf]) >= required for tf, required in
+                             {"M1": 40, "M5": 40, "M15": 30, "H1": 30, "H4": 30}.items()),
+        "data_quality": data_quality,
+        "timeframes": context,
+        "candles": frames,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "note": "Canonical v23 trigger is research-only. NO_TRADE is enforced until all-in costs and out-of-sample eligibility are independently verified.",
+    }
