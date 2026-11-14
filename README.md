@@ -153,3 +153,12 @@ The baseline Step Index backtest now avoids recalculating full-history MTF indic
 ## SQAO V2.4 — Quant workflow queue isolation
 
 V2.4 scopes the Step Index quantitative workflow concurrency group to the Git ref. A long-running research job on another branch can no longer hold the global queue and leave the current PR validation pending. Runs on the same ref remain serialized; no research or trading logic is changed. See [`docs/SQAO_V24_QUANT_QUEUE_ISOLATION.md`](docs/SQAO_V24_QUANT_QUEUE_ISOLATION.md).
+
+
+## SQAO Visual Intelligence V2.5 — MTF synchronization gate
+
+The existing V2.1 chart OCR/geometry layer is retained; no duplicate OCR engine is introduced. V2.5 adds `ENGINE/mtf_sync.py`, a fail-closed data-quality gate requiring a common quantitative snapshot timestamp and fresh closed-candle timestamps for D1/H4/H1/M15/M5/M1 (plus the H4 frame for the six-frame workflow). Missing frames, missing timestamps, stale/future candles or clock skew block the gate and force `NO_TRADE`. The gate is not a directional predictor or calibrated probability.
+
+The GPT Vision reconciliation layer includes the synchronization audit in its prompt and must not produce actionable entries when the gate is blocked. Tests: `python -m ENGINE.test_mtf_sync`.
+
+The source PDF "Optimización Operativa Step Index" is treated as research material only: its weighted 83.25% sell score is not a probability, its assumed 65% win rate is not empirical evidence, and its SMC/AMD, zero-slippage and contract-value claims require independent validation. No PDF scenario price is promoted to a live quote or trade level. READ-ONLY / RESEARCH-ONLY remains unchanged.
