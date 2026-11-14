@@ -102,23 +102,11 @@ async def _request(ws: Any, payload: dict[str, Any]) -> dict[str, Any]:
             return message
 
 
-async def discover_step_index() -> dict[str, str]:
+async def discover_step_index() -> dict[str, Any]:
+    from .deriv_symbols import select_step_index_symbol
     async with websockets.connect(WS, ping_interval=20, ping_timeout=20, open_timeout=20) as ws:
         data = await _request(ws, {"active_symbols": "brief", "req_id": 101})
-    candidates = []
-    for item in data.get("active_symbols", []) or []:
-        name = str(item.get("display_name") or item.get("underlying_symbol_name") or "")
-        symbol = str(item.get("symbol") or item.get("underlying_symbol") or "")
-        if symbol and "step index" in f"{name} {symbol}".lower():
-            candidates.append({"symbol": symbol, "display_name": name})
-    if not candidates:
-        raise RuntimeError("Deriv public API did not return an active Step Index symbol; no proxy instrument will be substituted.")
-    preferred = os.getenv("DERIV_STEP_NAME", "").strip().lower()
-    for candidate in candidates:
-        if preferred and (preferred == candidate["symbol"].lower() or preferred in candidate["display_name"].lower()):
-            return candidate
-    exact = next((x for x in candidates if x["display_name"].strip().lower() == "step index"), None)
-    return exact or candidates[0]
+    return select_step_index_symbol(data.get("active_symbols", []) or [])
 
 
 async def fetch_candles(symbol: str, timeframe: str, count: int) -> list[dict[str, Any]]:
