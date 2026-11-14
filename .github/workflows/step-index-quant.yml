@@ -104,7 +104,7 @@ jobs:
           SQAO_STEP_MIN_OOS_TRADES: '100'
           SQAO_STEP_TARGET_WIN_RATE: '0.70'
           SQAO_STEP_ROUND_TRIP_COST_PRICE: ${{ vars.SQAO_STEP_ROUND_TRIP_COST_PRICE }}
-          SQAO_INCLUDE_TRADE_INDICATOR_SNAPSHOTS: '0'
+          SQAO_INCLUDE_TRADE_INDICATOR_SNAPSHOTS: '1'
           SQAO_DATA_DIR: DATA
         run: python -m ENGINE.step_index_research
 
@@ -121,7 +121,28 @@ jobs:
 
       - name: Build and audit complete Table 18
         timeout-minutes: 10
-        run: python -m ENGINE.table18_full_audit
+        run: |
+          python -m ENGINE.table18_full_audit
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('DATA/step_index_table18_complete.json').read_text(encoding='utf-8'))
+          rows = data.get('rows', [])
+          if not rows:
+              raise SystemExit('Table 18 has no historical trade rows')
+          invalid = [r.get('candidate_id') for r in rows
+                     if r.get('indicator_provenance') != 'HISTORICAL_AT_SIGNAL'
+                     or len(r.get('indicator_timeframes_valid', [])) != 6]
+          if invalid:
+              raise SystemExit(f'Historical indicator provenance incomplete for trades: {invalid[:20]}')
+          for row in rows:
+              signal = int(row['signal_epoch'])
+              for tf in ('d1', 'h4', 'h1', 'm15', 'm5', 'm1'):
+                  close_epoch = row.get(f'signal_{tf}_candle_close_epoch')
+                  if close_epoch is None or int(close_epoch) > signal:
+                      raise SystemExit(f'Look-ahead or missing snapshot: trade={row["candidate_id"]}, tf={tf}')
+          print('TABLE18_HISTORICAL_INDICATORS_OK', len(rows))
+          PY
 
       - name: Upload Table 18 checkpoint
         if: always()
