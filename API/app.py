@@ -118,7 +118,7 @@ async def health():
     return {
         "status": "ok" if connector_ok else "degraded",
         "service": "SQAO Live API",
-        "version": "2.2.0",
+        "version": app.version,
         "read_only": True,
         "background_connector_enabled": RUN_CONNECTOR,
         "background_connector_running": bool(task_running),
