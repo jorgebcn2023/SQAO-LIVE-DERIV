@@ -1,22 +1,23 @@
 openapi: 3.1.0
 info:
   title: SQAO Live Deriv API
-  version: 2.4.4-rc1
+  version: 2.5.0
   description: >-
-    Read-only live Deriv Step Index API. Snapshot includes closed D1, H4, H1,
-    M15, M5 and M1 candles and the canonical v23 research detector. The endpoint
-    enforces NO_TRADE until all-in costs and OOS eligibility are verified. No trading operations are exposed.
+    Read-only Deriv Synthetic Index analytics API. V2.5 adds OCR visual audit
+    and fail-closed synchronized MTF data-quality controls. Snapshot requires
+    timestamped closed D1, H4, H1, M15, M5 and M1 candles. No trading operations
+    are exposed. Incomplete or unverified evidence must result in NO_TRADE.
 servers:
   - url: https://sqao-live-api-v2.onrender.com
 paths:
   /health:
     get:
       operationId: health
-      summary: Check API, connector task and market-data freshness
+      summary: Check API, connector and market-data freshness
       security: []
       responses:
         '200':
-          description: Service state and data freshness for all required timeframes
+          description: API and market data health
           content:
             application/json:
               schema:
@@ -28,30 +29,32 @@ paths:
                   read_only: {type: boolean}
                   background_connector_enabled: {type: boolean}
                   background_connector_running: {type: boolean}
-                  background_connector_started_at_utc: {type: string, nullable: true}
-                  background_connector_error: {type: string, nullable: true}
+                  background_connector_started_at_utc: {type: [string, 'null']}
+                  background_connector_error: {type: [string, 'null']}
                   market_data:
                     type: object
                     properties:
                       max_data_age_seconds: {type: integer}
                       all_timeframes_fresh: {type: boolean}
-                      timeframes:
-                        type: object
+                      timeframes: {type: object, additionalProperties: true}
   /market/active-symbols:
     get:
       operationId: getActiveStepSymbols
-      summary: List active Deriv Step Index symbols
+      summary: Discover actual active Deriv Step Index symbols
+      security: []
       responses:
         '200':
-          description: Active Step Index symbols
+          description: Active symbols and display names
           content:
             application/json:
               schema:
                 type: object
+                additionalProperties: true
   /market/ohlc:
     get:
       operationId: getStepOHLC
-      summary: Get recent OHLC candles from Deriv
+      summary: Retrieve closed OHLC candles for one timeframe
+      security: []
       parameters:
         - name: symbol
           in: query
@@ -70,22 +73,25 @@ paths:
           schema: {type: integer, minimum: 20, maximum: 500, default: 500}
       responses:
         '200':
-          description: OHLC candles
+          description: Timestamped OHLC candle series
           content:
             application/json:
               schema:
                 type: object
+                additionalProperties: true
         '502':
-          description: Deriv upstream error or insufficient market data
+          description: Deriv upstream error or insufficient data
   /analysis/snapshot:
     get:
       operationId: getSQAOQuantSnapshot
-      summary: Get complete live multi-timeframe analysis
+      summary: Retrieve complete live synchronized MTF quantitative snapshot
       description: >-
-        Resolves symbol=AUTO against active Step Index symbols, retrieves closed
-        D1/H4/H1/M15/M5/M1 candles, aligns H4/H1/M15/M5/M1 at the latest closed M1
-        decision boundary, and evaluates the canonical v23 detector. Decision is
-        forced to NO_TRADE while costs and OOS eligibility remain unverified.
+        Resolves AUTO to the actual active Step Index symbol and returns closed
+        D1/H4/H1/M15/M5/M1 OHLC with timestamps, synchronization audit and
+        conservative research decision. Never assume a symbol or manufacture
+        missing prices. Unverified all-in costs or failed OOS gates require
+        NO_TRADE.
+      security: []
       parameters:
         - name: symbol
           in: query
@@ -97,10 +103,11 @@ paths:
           schema: {type: integer, minimum: 20, maximum: 500, default: 500}
       responses:
         '200':
-          description: Live MTF quantitative snapshot
+          description: Live MTF snapshot and data-quality gate
           content:
             application/json:
               schema:
                 type: object
+                additionalProperties: true
         '502':
-          description: Deriv upstream error or insufficient candles
+          description: Deriv upstream error, missing frames or insufficient candles
