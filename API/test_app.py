@@ -26,7 +26,7 @@ class ClosedCandleTests(unittest.TestCase):
         self.assertEqual(result[0]["close"], 12.0)
 
     def test_api_is_versioned_and_read_only_routes_have_no_trade_methods(self):
-        self.assertEqual(app.version, "2.5.0")
+        self.assertEqual(app.version, "2.6.0")
         methods = {
             method.lower()
             for route in app.routes
@@ -39,6 +39,7 @@ class ClosedCandleTests(unittest.TestCase):
         self.assertIn("/market/active-symbols", paths)
         self.assertIn("/market/ohlc", paths)
         self.assertIn("/analysis/snapshot", paths)
+        self.assertFalse(any(getattr(route, "path", "") in {"/proposal", "/buy", "/sell"} for route in app.routes))
 
 
 if __name__ == "__main__":
