@@ -353,6 +353,18 @@ async def analysis_snapshot(
                          {"M1": 40, "M5": 40, "M15": 30, "H1": 30, "H4": 30}.items())
     integrity_gate = _build_integrity_gate(mtf_sync_gate, data_complete, setup)
 
+    # V3.5 runs as a parallel, read-only research layer on the exact same
+    # closed Deriv candles. It cannot override the canonical v2.3 NO_TRADE gate.
+    from ENGINE.sqao_v35_pipeline import analyze_v35
+    v35_research = analyze_v35(
+        frames,
+        int(generated_at.timestamp()),
+        costs_verified=False,
+        oos_gate_pass=False,
+        risk_gate_pass=False,
+        technical_direction=None,
+    )
+
     # This endpoint is research-only. Costs/OOS are not certified by live signal confirmation.
     return {
         "api_version": "2.6.0",
@@ -360,7 +372,8 @@ async def analysis_snapshot(
         "mtf_sync_version": MTF_SYNC_VERSION,
         "mtf_sync_gate": mtf_sync_gate,
         "mtf_sync_passed": mtf_sync_passed,
-        "engine": "SQAO_STEP_INDEX_V23_CANONICAL",
+        "engine": "SQAO_STEP_INDEX_V23_CANONICAL_WITH_V35_RESEARCH",
+        "v35_research": v35_research,
         "symbol": resolved,
         "symbol_resolution": mode,
         "source": "Deriv public market data",
