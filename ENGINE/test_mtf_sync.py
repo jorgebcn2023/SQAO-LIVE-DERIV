@@ -47,3 +47,11 @@ def test_uploaded_subset_can_be_checked_without_inventing_missing_images():
     frames = {"M5": {"last_closed_epoch": now - 30}, "M1": {"last_closed_epoch": now - 20}}
     result = audit_mtf_synchronization(snap(now, frames), expected_timeframes=("M5", "M1"), now_epoch=now)
     assert result["status"] == "PASS"
+
+if __name__ == "__main__":
+    test_all_six_fresh_frames_pass()
+    test_missing_h4_blocks()
+    test_stale_frame_blocks()
+    test_no_common_snapshot_timestamp_is_unverifiable()
+    test_uploaded_subset_can_be_checked_without_inventing_missing_images()
+    print("SQAO MTF synchronization tests: OK")
