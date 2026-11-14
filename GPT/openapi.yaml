@@ -5,7 +5,7 @@ info:
   description: >-
     Read-only live Deriv Step Index API. Snapshot includes closed D1, H4, H1,
     M15, M5 and M1 candles and the canonical v23 research detector. The endpoint
-    enforces NO_TRADE until all-in costs and OOS eligibility are verified. No trading operations are exposed.
+    enforces the fail-closed V2.5 MTF synchronization gate and NO_TRADE until all-in costs and OOS eligibility are verified. No trading operations are exposed.
 servers:
   - url: https://sqao-live-api-v2.onrender.com
 paths:
