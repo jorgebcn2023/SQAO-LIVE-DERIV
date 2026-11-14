@@ -4,7 +4,7 @@ from __future__ import annotations
 import unittest
 
 from ENGINE.chart_visual_extraction import (
-    _axis_calibration, _extract_indicator_readings, _num, table18_template,
+    _axis_calibration, _extract_indicator_readings, _normalize_timeframe, _num, table18_template,
 )
 
 
@@ -27,6 +27,14 @@ class ChartVisualExtractionTests(unittest.TestCase):
         self.assertEqual(_num("7,306.3"), 7306.3)
         self.assertEqual(_num("7.306,3"), 7306.3)
         self.assertEqual(_num("7306,3"), 7306.3)
+
+    def test_timeframe_aliases_normalize(self):
+        self.assertEqual(_normalize_timeframe("Daily chart"), "D1")
+        self.assertEqual(_normalize_timeframe("4H"), "H4")
+        self.assertEqual(_normalize_timeframe("1 hour"), "H1")
+        self.assertEqual(_normalize_timeframe("15M"), "M15")
+        self.assertEqual(_normalize_timeframe("5M"), "M5")
+        self.assertEqual(_normalize_timeframe("1M"), "M1")
 
     def test_table18_keeps_unknowns_null(self):
         table = table18_template(7306.3)
