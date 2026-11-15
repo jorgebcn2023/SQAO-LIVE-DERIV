@@ -4,6 +4,7 @@ import asyncio
 import json
 import math
 import os
+import hmac
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,12 +53,14 @@ async def stop_background_connector() -> None:
         _connector_task = None
 
 
-def _auth_ok(key: str | None) -> bool:
-    return not API_KEY or key == API_KEY
-
-
 def _check_auth(key: str | None) -> None:
-    if not _auth_ok(key):
+    """Fail closed when server authentication is not configured or the key is invalid."""
+    if not API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="SQAO API authentication is not configured",
+        )
+    if key is None or not hmac.compare_digest(key, API_KEY):
         raise HTTPException(status_code=401, detail="Invalid SQAO API key")
 
 
