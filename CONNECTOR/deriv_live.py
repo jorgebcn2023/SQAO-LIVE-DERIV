@@ -68,13 +68,19 @@ class CandleAggregator:
 
 
 async def receive_matching(ws, req_id: int):
+    """Return only the response belonging to this request.
+
+    Tick/subscription messages and responses for other outstanding history
+    requests must never be mistaken for this request's result.
+    """
     while True:
         msg = json.loads(await ws.recv())
+        if msg.get("req_id") != req_id:
+            continue
         if msg.get("error"):
             error = msg["error"]
             raise RuntimeError(error.get("message", str(error)))
-        if msg.get("req_id") == req_id or msg.get("msg_type") in {"active_symbols", "candles", "history"}:
-            return msg
+        return msg
 
 
 async def autodetect_symbol(ws):
@@ -100,7 +106,16 @@ async def autodetect_symbol(ws):
 
 
 async def seed_history(ws, symbol: str, output: Path, count: int = 500):
+    """Persist closed history and return each timeframe's forming candle.
+
+    Seeding the in-progress candle into the aggregator is essential: otherwise
+    a restart drops that candle and the next completed H1/H4/D1 bar is not
+    persisted until a later bucket transition.
+    """
     now = int(datetime.now(timezone.utc).timestamp())
+    forming: dict[int, Candle] = {}
+    received_counts: dict[str, int] = {}
+    written_counts: dict[str, int] = {}
     for tf, granularity, label in (
         (1, 60, "M1"),
         (5, 300, "M5"),
@@ -125,6 +140,7 @@ async def seed_history(ws, symbol: str, output: Path, count: int = 500):
         candles = msg.get("candles", [])
         if not candles:
             raise RuntimeError(f"No historical candles returned for {label} / {symbol}")
+        received_counts[label] = len(candles)
 
         path = output / f"ohlc_{label}.csv"
         written = 0
@@ -135,15 +151,34 @@ async def seed_history(ws, symbol: str, output: Path, count: int = 500):
                 # Do not seed an in-progress candle and then append a duplicate
                 # when the live aggregator closes that same time bucket.
                 if epoch + granularity > now:
+                    # Keep the current bucket in memory so live ticks continue
+                    # the exact Deriv OHLC candle after a restart.
+                    if epoch <= now < epoch + granularity:
+                        try:
+                            values = {key: float(c[key]) for key in ("open", "high", "low", "close")}
+                            if all(math.isfinite(value) for value in values.values()):
+                                forming[tf] = Candle(
+                                    epoch, values["open"], values["high"],
+                                    values["low"], values["close"], label
+                                )
+                        except (KeyError, TypeError, ValueError, OverflowError):
+                            pass
                     continue
                 f.write(
                     f"{epoch},{float(c['open'])},{float(c['high'])},"
                     f"{float(c['low'])},{float(c['close'])},{label}\n"
                 )
                 written += 1
+        written_counts[label] = written
         if written == 0:
             raise RuntimeError(f"No completed historical candles returned for {label} / {symbol}")
-    print(f"HISTORY_SEEDED symbol={symbol} count={count} completed_only=true", flush=True)
+    print(
+        f"HISTORY_SEEDED symbol={symbol} requested={count} "
+        f"received={received_counts} written_closed={written_counts} "
+        f"forming_restored={sorted(TIMEFRAME_LABELS[tf] for tf in forming)}",
+        flush=True,
+    )
+    return forming
 
 
 def load_engine_frames(output: Path):
@@ -219,7 +254,11 @@ async def run():
                     symbol = await autodetect_symbol(ws)
                     print(f"AUTO_SYMBOL={symbol}", flush=True)
 
-                await seed_history(ws, symbol, output, history_count)
+                forming_candles = await seed_history(ws, symbol, output, history_count)
+                # Restore every still-forming bucket before consuming ticks.
+                # This prevents a restart from waiting until the next H1/H4/D1
+                # boundary before the latest closed candle reaches disk.
+                aggregator.current.update(forming_candles)
                 run_analysis(output)
 
                 await ws.send(json.dumps({"ticks": symbol, "subscribe": 1, "req_id": 1}))
