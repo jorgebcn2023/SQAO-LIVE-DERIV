@@ -1,8 +1,31 @@
 """API contract tests for the read-only SQAO MTF endpoints."""
 import time
 import unittest
+from unittest.mock import patch
 
-from API.app import GRANULARITY, TIMEFRAMES, _build_integrity_gate, _closed_candles, app
+from fastapi import HTTPException
+
+from API.app import GRANULARITY, TIMEFRAMES, _build_integrity_gate, _check_auth, _closed_candles, app
+
+
+class AuthenticationTests(unittest.TestCase):
+    def test_missing_server_secret_fails_closed(self):
+        with patch("API.app.API_KEY", ""):
+            with self.assertRaises(HTTPException) as raised:
+                _check_auth(None)
+        self.assertEqual(raised.exception.status_code, 503)
+
+    def test_missing_or_invalid_request_key_is_rejected(self):
+        with patch("API.app.API_KEY", "test-only-secret"):
+            for supplied in (None, "wrong-secret"):
+                with self.subTest(supplied=supplied):
+                    with self.assertRaises(HTTPException) as raised:
+                        _check_auth(supplied)
+                    self.assertEqual(raised.exception.status_code, 401)
+
+    def test_matching_request_key_is_accepted(self):
+        with patch("API.app.API_KEY", "test-only-secret"):
+            self.assertIsNone(_check_auth("test-only-secret"))
 
 
 class IntegrityGateTests(unittest.TestCase):
