@@ -68,7 +68,8 @@ class FreshnessThresholdTests(unittest.TestCase):
         for timeframe in ("H1", "H4", "D1"):
             with self.subTest(timeframe=timeframe):
                 threshold = _effective_max_age(GRANULARITY[timeframe], 180)
-                self.assertGreater(threshold + 1, threshold)
+                stale_age = threshold + 1
+                self.assertFalse(stale_age <= threshold)
 
 
 class ClosedCandleTests(unittest.TestCase):
