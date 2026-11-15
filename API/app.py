@@ -144,17 +144,27 @@ async def health():
     }
 
 
+def _matches_req_id(expected_req_id: int | None, message: dict[str, Any]) -> bool:
+    """Accept only the response correlated to the outstanding Deriv request."""
+    return expected_req_id is None or message.get("req_id") == expected_req_id
+
+
 async def _deriv_request(payload: dict[str, Any]) -> dict[str, Any]:
+    expected_req_id = payload.get("req_id")
     try:
         async with websockets.connect(DERIV_WS, open_timeout=12, close_timeout=5, ping_interval=20, ping_timeout=20) as ws:
             await ws.send(json.dumps(payload))
             while True:
                 data = json.loads(await ws.recv())
+                # A shared WebSocket can deliver ticks/subscription events or
+                # another request's response. Ignore all non-matching messages,
+                # including their errors, until this request's req_id arrives.
+                if not _matches_req_id(expected_req_id, data):
+                    continue
                 if data.get("error"):
                     error = data["error"]
                     raise HTTPException(status_code=502, detail=error.get("message", "Deriv error"))
-                if payload.get("req_id") is None or data.get("req_id") == payload.get("req_id") or data.get("msg_type") in {"active_symbols", "candles", "history"}:
-                    return data
+                return data
     except HTTPException:
         raise
     except Exception as exc:
