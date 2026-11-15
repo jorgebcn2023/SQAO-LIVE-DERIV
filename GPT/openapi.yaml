@@ -29,6 +29,8 @@ paths:
       summary: Discover active Step Index symbols from Deriv public market data
       parameters:
         - $ref: '#/components/parameters/SQAOKey'
+      security:
+        - SQAOHeaderKey: []
       responses:
         '200':
           description: Active Step Index symbols
@@ -47,7 +49,9 @@ paths:
                   count: {type: integer}
                   source: {type: string}
         '401':
-          description: Invalid SQAO API key when server-side key protection is enabled
+          description: Missing or invalid SQAO API key
+        '503':
+          description: Server-side SQAO_ACTION_KEY is not configured
         '502':
           description: Deriv public market-data request failed
   /market/ohlc:
@@ -90,7 +94,9 @@ paths:
                     type: array
                     items: {$ref: '#/components/schemas/Candle'}
         '401':
-          description: Invalid SQAO API key when protection is enabled
+          description: Missing or invalid SQAO API key
+        '503':
+          description: Server-side SQAO_ACTION_KEY is not configured
         '422':
           description: Invalid timeframe or count
         '502':
@@ -132,11 +138,17 @@ components:
     SQAOKey:
       name: X-SQAO-Key
       in: header
-      required: false
+      required: true
       description: >-
-        Only required if SQAO_ACTION_KEY is configured on the server.
-        Never expose or embed this secret in public GPT instructions.
+        Required for protected endpoints. Configure this as an API key in the
+        GPT Action authentication settings; never place the secret in prompts,
+        public files, URLs or source code.
       schema: {type: string}
+  securitySchemes:
+    SQAOHeaderKey:
+      type: apiKey
+      in: header
+      name: X-SQAO-Key
   schemas:
     Candle:
       type: object
