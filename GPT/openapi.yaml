@@ -60,6 +60,8 @@ paths:
       summary: Retrieve fully closed and validated OHLC candles
       parameters:
         - $ref: '#/components/parameters/SQAOKey'
+      security:
+        - SQAOHeaderKey: []
         - name: symbol
           in: query
           required: false
@@ -112,6 +114,8 @@ paths:
         authorizes execution. The API enforces NO_TRADE and execution_eligible=false.
       parameters:
         - $ref: '#/components/parameters/SQAOKey'
+      security:
+        - SQAOHeaderKey: []
         - name: symbol
           in: query
           required: false
