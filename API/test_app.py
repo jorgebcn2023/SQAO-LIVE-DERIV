@@ -1,4 +1,5 @@
 """API contract tests for the read-only SQAO MTF endpoints."""
+import json
 import time
 import unittest
 from unittest.mock import patch
@@ -6,6 +7,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from API.app import GRANULARITY, TIMEFRAMES, _build_integrity_gate, _check_auth, _closed_candles, app
+from CONNECTOR.deriv_live import Candle, CandleAggregator, receive_matching
 
 
 class AuthenticationTests(unittest.TestCase):
@@ -85,6 +87,43 @@ class ClosedCandleTests(unittest.TestCase):
         self.assertIn("/market/ohlc", paths)
         self.assertIn("/analysis/snapshot", paths)
         self.assertFalse(any(getattr(route, "path", "") in {"/proposal", "/buy", "/sell"} for route in app.routes))
+
+
+class ConnectorRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    """Regression coverage for restart continuity and WebSocket response routing."""
+    def test_restored_forming_candle_is_continued_and_emitted_once(self):
+        aggregator = CandleAggregator(timeframes=(1,))
+        start = 1_800_000_000
+        restored = Candle(start, 100.0, 103.0, 99.0, 102.0, "M1")
+        aggregator.current[1] = restored
+
+        emitted_same_bucket = aggregator.update(start + 30, 104.0)
+        self.assertEqual(emitted_same_bucket, [])
+        self.assertEqual(aggregator.current[1].open, 100.0)
+        self.assertEqual(aggregator.current[1].high, 104.0)
+        self.assertEqual(aggregator.current[1].low, 99.0)
+        self.assertEqual(aggregator.current[1].close, 104.0)
+
+        emitted_next_bucket = aggregator.update(start + 60, 105.0)
+        self.assertEqual(len(emitted_next_bucket), 1)
+        self.assertEqual(emitted_next_bucket[0].timestamp, start)
+        self.assertEqual(emitted_next_bucket[0].close, 104.0)
+
+    async def test_history_receiver_ignores_other_request_ids(self):
+        class FakeWebSocket:
+            def __init__(self):
+                self.messages = [
+                    json.dumps({"msg_type": "candles", "req_id": 200, "candles": []}),
+                    json.dumps({"msg_type": "tick", "req_id": 1}),
+                    json.dumps({"msg_type": "candles", "req_id": 1101, "candles": [{"epoch": 1}]}),
+                ]
+
+            async def recv(self):
+                return self.messages.pop(0)
+
+        result = await receive_matching(FakeWebSocket(), 1101)
+        self.assertEqual(result["req_id"], 1101)
+        self.assertEqual(result["candles"], [{"epoch": 1}])
 
 
 if __name__ == "__main__":
