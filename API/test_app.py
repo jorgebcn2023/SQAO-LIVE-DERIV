@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from API.app import GRANULARITY, TIMEFRAMES, _build_integrity_gate, _check_auth, _closed_candles, app
+from API.app import (GRANULARITY, TIMEFRAMES, _build_integrity_gate, _check_auth,
+                     _closed_candles, _effective_max_age, app)
 from CONNECTOR.deriv_live import Candle, CandleAggregator, receive_matching
 
 
@@ -50,6 +51,24 @@ class IntegrityGateTests(unittest.TestCase):
         self.assertEqual(result["status"], "BLOCKED")
         self.assertIn("INSUFFICIENT_ALIGNED_CLOSED_CANDLES", result["blockers"])
         self.assertIn("NON_CONTIGUOUS_SIGNAL_WINDOW", result["blockers"])
+
+
+class FreshnessThresholdTests(unittest.TestCase):
+    def test_completed_candle_age_allows_elapsed_forming_bar(self):
+        for timeframe in ("H1", "H4", "D1"):
+            with self.subTest(timeframe=timeframe):
+                granularity = GRANULARITY[timeframe]
+                threshold = _effective_max_age(granularity, 180)
+                # At 90% through the current forming bar, the previous closed
+                # candle is 1.9 granularities old and must remain fresh.
+                self.assertEqual(threshold, 180 + 2 * granularity)
+                self.assertLessEqual(int(1.9 * granularity), threshold)
+
+    def test_stale_completed_candle_beyond_two_bars_is_rejected(self):
+        for timeframe in ("H1", "H4", "D1"):
+            with self.subTest(timeframe=timeframe):
+                threshold = _effective_max_age(GRANULARITY[timeframe], 180)
+                self.assertGreater(threshold + 1, threshold)
 
 
 class ClosedCandleTests(unittest.TestCase):
