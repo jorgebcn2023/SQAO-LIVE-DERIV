@@ -90,6 +90,7 @@ class ClosedCandleTests(unittest.TestCase):
 
 
 class ConnectorRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    """Regression coverage for restart continuity and WebSocket response routing."""
     def test_restored_forming_candle_is_continued_and_emitted_once(self):
         aggregator = CandleAggregator(timeframes=(1,))
         start = 1_800_000_000
