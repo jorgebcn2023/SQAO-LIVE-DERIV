@@ -7,8 +7,20 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from API.app import (GRANULARITY, TIMEFRAMES, _build_integrity_gate, _check_auth,
-                     _closed_candles, _effective_max_age, app)
+                     _closed_candles, _effective_max_age, _matches_req_id, app)
 from CONNECTOR.deriv_live import Candle, CandleAggregator, receive_matching
+
+
+
+
+class DerivRequestCorrelationTests(unittest.TestCase):
+    def test_only_exact_request_id_is_accepted(self):
+        self.assertTrue(_matches_req_id(9001, {"req_id": 9001, "msg_type": "active_symbols"}))
+        self.assertFalse(_matches_req_id(9001, {"req_id": 200, "msg_type": "candles"}))
+        self.assertFalse(_matches_req_id(9001, {"msg_type": "candles"}))
+
+    def test_unscoped_request_accepts_message(self):
+        self.assertTrue(_matches_req_id(None, {"msg_type": "ping"}))
 
 
 class AuthenticationTests(unittest.TestCase):
