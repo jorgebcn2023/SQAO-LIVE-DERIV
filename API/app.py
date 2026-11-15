@@ -90,13 +90,17 @@ def _latest_data_status() -> dict[str, Any]:
             pass
 
         age = max(0, now - latest_epoch) if latest_epoch is not None else None
-        # CSV bars use their start timestamp; allow one full bar plus the
-        # configured freshness window before calling the feed stale.
-        fresh = age is not None and age <= max_age + granularity
+        # CSV bars store candle-open epochs. A completed candle can therefore
+        # be almost one full timeframe old while still being the latest closed
+        # candle. Expose this effective limit explicitly to avoid ambiguity.
+        effective_max_age = max_age + granularity
+        fresh = age is not None and age <= effective_max_age
         status[timeframe] = {
             "rows": rows,
             "latest_candle_epoch": latest_epoch,
             "age_seconds": age,
+            "max_age_seconds": max_age,
+            "effective_max_age_seconds": effective_max_age,
             "fresh": fresh,
         }
     return {
