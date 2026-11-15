@@ -64,6 +64,11 @@ def _check_auth(key: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid SQAO API key")
 
 
+def _effective_max_age(granularity: int, max_age: int) -> int:
+    """Maximum age of a candle-open epoch for a completed-only OHLC file."""
+    return max_age + (2 * granularity)
+
+
 def _latest_data_status() -> dict[str, Any]:
     """Read only local connector data; never infer freshness from task state."""
     now = int(datetime.now(timezone.utc).timestamp())
@@ -90,10 +95,11 @@ def _latest_data_status() -> dict[str, Any]:
             pass
 
         age = max(0, now - latest_epoch) if latest_epoch is not None else None
-        # CSV bars store candle-open epochs. A completed candle can therefore
-        # be almost one full timeframe old while still being the latest closed
-        # candle. Expose this effective limit explicitly to avoid ambiguity.
-        effective_max_age = max_age + granularity
+        # CSV bars store candle-open epochs and only completed bars are written.
+        # Until the next bar closes, the latest completed bar can be nearly two
+        # granularities old: one full bar plus the elapsed forming bar. Include
+        # that lifecycle window, then apply the configured feed-delay allowance.
+        effective_max_age = _effective_max_age(granularity, max_age)
         fresh = age is not None and age <= effective_max_age
         status[timeframe] = {
             "rows": rows,
