@@ -211,6 +211,10 @@ components:
             - type: string
             - type: object
               additionalProperties: true
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
     StepSymbol:
       type: object
       required: [symbol, display_name]
