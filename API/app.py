@@ -183,18 +183,67 @@ async def _active_step_symbols() -> list[dict[str, str]]:
 
 
 async def _resolve_symbol(symbol: str) -> tuple[str, str]:
-    requested = symbol.strip()
-    if requested and requested.upper() != "AUTO":
-        return requested, "EXPLICIT"
+    """Resolve only a uniquely verified active Step Index; never pick an ambiguous first match."""
+    requested = (symbol or "AUTO").strip()
     candidates = await _active_step_symbols()
+
+    # Deduplicate repeated provider rows by exact symbol identifier.
+    unique: dict[str, dict[str, str]] = {}
+    for item in candidates:
+        candidate_symbol = str(item.get("symbol", "")).strip()
+        if candidate_symbol:
+            unique.setdefault(candidate_symbol.casefold(), {
+                "symbol": candidate_symbol,
+                "display_name": str(item.get("display_name", "")),
+            })
+    candidates = list(unique.values())
+
+    if requested and requested.upper() != "AUTO":
+        matches = [item for item in candidates if item["symbol"].casefold() == requested.casefold()]
+        if len(matches) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "STEP_INDEX_SYMBOL_NOT_VERIFIED",
+                    "message": "The explicit symbol must match exactly one active Step Index symbol.",
+                    "requested_symbol": requested,
+                    "matches": len(matches),
+                },
+            )
+        return matches[0]["symbol"], "EXPLICIT"
+
     if not candidates:
         raise HTTPException(status_code=502, detail="No active Step Index symbol found")
-    preferred = os.getenv("DERIV_STEP_NAME", "").strip().lower()
+
+    preferred = os.getenv("DERIV_STEP_NAME", "").strip().casefold()
     if preferred:
-        for item in candidates:
-            if preferred == item["symbol"].lower() or preferred in item["display_name"].lower():
-                return item["symbol"], "AUTO_PREFERRED"
-    return candidates[0]["symbol"], "AUTO"
+        preferred_matches = [
+            item for item in candidates
+            if preferred == item["symbol"].casefold()
+            or preferred in item["display_name"].casefold()
+        ]
+        if len(preferred_matches) == 1:
+            return preferred_matches[0]["symbol"], "AUTO_PREFERRED"
+        if len(preferred_matches) > 1:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "AMBIGUOUS_STEP_INDEX_PREFERENCE",
+                    "message": "DERIV_STEP_NAME matches more than one active Step Index symbol.",
+                    "matches": [item["symbol"] for item in preferred_matches],
+                },
+            )
+
+    if len(candidates) != 1:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AMBIGUOUS_STEP_INDEX_SYMBOL",
+                "message": "AUTO requires exactly one active Step Index candidate or one unique DERIV_STEP_NAME preference.",
+                "matches": [item["symbol"] for item in candidates],
+            },
+        )
+    return candidates[0]["symbol"], "AUTO_UNIQUE"
 
 
 async def _candles(symbol: str, timeframe: str, count: int) -> list[dict[str, Any]]:
