@@ -129,11 +129,10 @@ class OpenAPIContractTests(unittest.TestCase):
         start = next(i for i, line in enumerate(lines) if line == f"  {path}:")
         end = next(
             (i for i in range(start + 1, len(lines))
-             if re.match(r"^  /[^:\\s]+:\\s*$", lines[i]) or lines[i] == "components:"),
+             if re.match(r"^  /[^:\s]+:\s*$", lines[i]) or lines[i] == "components:"),
             len(lines),
         )
-        return "\\n".join(lines[start:end])
-
+        return "\n".join(lines[start:end])
 
 class SymbolResolutionFailClosedTests(unittest.IsolatedAsyncioTestCase):
     async def test_auto_resolves_single_active_candidate(self):
