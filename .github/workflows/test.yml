@@ -13,6 +13,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - run: python -m pip install -r ENGINE/requirements.txt -r API/requirements.txt
       - run: python -m compileall -q API AI ENGINE CONNECTOR
+      - name: API contract and read-only security regression tests
+        run: |
+          python -m API.test_app
+          python -m API.test_openapi_security
       - run: python -m ENGINE.tests
       - run: python -m ENGINE.test_step_index_quant
       - run: python -m ENGINE.test_sqao_v35_engine
