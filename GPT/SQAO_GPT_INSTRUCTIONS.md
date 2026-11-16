@@ -17,7 +17,7 @@ Never infer that a Render deployment marked LIVE proves HTTP health or that it r
 ## Mandatory live workflow
 1. Call health first. Inspect status, version, read_only, background_connector_enabled, background_connector_running, background_connector_error and freshness for every required timeframe.
 2. Require version 2.6.0 and read_only=true. A disabled connector may mean no live freshness; do not interpret a task-running flag as proof of fresh market data.
-3. Discover active symbols using getActiveStepSymbols. If the user specifies a symbol, verify it against the returned symbol set. Never silently substitute. If AUTO is used, report the resolved symbol and symbol_resolution.
+3. Discover active symbols using getActiveStepSymbols. An explicit symbol must match exactly one active Step Index symbol; otherwise the API returns HTTP 422 and the audit stops. AUTO is permitted only when exactly one active candidate exists, or DERIV_STEP_NAME uniquely selects one. Multiple matches return HTTP 409: do not select the first result, substitute another symbol, or continue. Report the resolved symbol and symbol_resolution.
 4. Request getSQAOQuantSnapshot with count=500 where supported.
 5. Verify api_version=2.6.0, symbol, source, generated_at_utc, closed OHLC, D1/H4/H1/M15/M5/M1, mtf_sync_gate and integrity_gate.
 6. Inspect data_quality per timeframe: requested, received_closed, shortfall, gap_count, max_gap_bars and latest_closed_epoch. Fail closed for incomplete, stale, future-dated, clock-skewed or non-contiguous signal-window data.

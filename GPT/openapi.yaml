@@ -3,19 +3,22 @@ info:
   title: SQAO Live Deriv API
   version: 2.6.0
   description: >-
-    Read-only Deriv Step Index research API. All exposed operations are GET.
-    No order placement, modification, cancellation or account trading endpoints
-    are exposed. Live candidate analysis is research-only: decision remains
-    NO_TRADE and execution_eligible=false until independent all-in cost and
-    chronological out-of-sample validation requirements are met.
+    Read-only Deriv Step Index research API. This is the service API version;
+    the SQAO instruction/skill bundle version 3.1.3 is a separate client-side
+    identifier. Only GET operations are exposed. No order placement,
+    modification, cancellation, account, balance or trading endpoints are
+    exposed. The API enforces decision=NO_TRADE and execution_eligible=false.
+  x-sqao-read-only: true
 servers:
   - url: https://sqao-live-api-v2.onrender.com
-    description: Render API host; deployed version must be verified with /health.
+    description: Canonical Render host; verify deployed version and health before use.
 paths:
   /health:
     get:
       operationId: health
       summary: Check API version, connector state and market-data freshness
+      description: Public health/readiness metadata only; no account or trading data.
+      x-sqao-operation-class: read_only_research
       responses:
         '200':
           description: Service state and freshness by timeframe
@@ -27,6 +30,7 @@ paths:
     get:
       operationId: getActiveStepSymbols
       summary: Discover active Step Index symbols from Deriv public market data
+      x-sqao-operation-class: read_only_research
       security:
         - SQAOHeaderKey: []
       responses:
@@ -35,91 +39,126 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  symbols:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        symbol: {type: string}
-                        display_name: {type: string}
-                  count: {type: integer}
-                  source: {type: string}
+                $ref: '#/components/schemas/ActiveSymbols'
         '401':
           description: Missing or invalid SQAO API key
-        '503':
-          description: Server-side SQAO_ACTION_KEY is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '502':
           description: Deriv public market-data request failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Server-side SQAO_ACTION_KEY is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /market/ohlc:
     get:
       operationId: getStepOHLC
       summary: Retrieve fully closed and validated OHLC candles
+      description: >-
+        Returns completed, deduplicated candles only. AUTO is accepted only
+        when one active Step Index candidate exists, or DERIV_STEP_NAME
+        uniquely selects one candidate. Explicit symbols must match exactly
+        one active Step Index symbol. Ambiguity returns HTTP 409.
+      x-sqao-operation-class: read_only_research
       security:
         - SQAOHeaderKey: []
       parameters:
         - name: symbol
           in: query
           required: false
-          description: Exact Deriv symbol or AUTO to discover an active Step Index symbol.
-          schema: {type: string, default: AUTO}
+          description: Exact active Step Index symbol, or AUTO when resolution is unique.
+          schema:
+            type: string
+            default: AUTO
         - name: timeframe
           in: query
           required: false
-          schema: {type: string, enum: [M1, M5, M15, H1, H4, D1], default: M1}
+          schema:
+            type: string
+            enum: [M1, M5, M15, H1, H4, D1]
+            default: M1
         - name: count
           in: query
           required: false
-          schema: {type: integer, minimum: 20, maximum: 500, default: 500}
+          schema:
+            type: integer
+            minimum: 20
+            maximum: 500
+            default: 500
       responses:
         '200':
           description: Timestamped, closed OHLC candles from Deriv
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  symbol: {type: string}
-                  symbol_resolution: {type: string}
-                  timeframe: {type: string}
-                  granularity_seconds: {type: integer}
-                  count: {type: integer}
-                  latest_closed_epoch: {type: integer}
-                  latest_closed_utc: {type: string, format: date-time}
-                  source: {type: string}
-                  read_only: {type: boolean, const: true}
-                  candles:
-                    type: array
-                    items: {$ref: '#/components/schemas/Candle'}
+                $ref: '#/components/schemas/OHLCResponse'
         '401':
           description: Missing or invalid SQAO API key
-        '503':
-          description: Server-side SQAO_ACTION_KEY is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: AUTO or configured preference resolves to multiple active Step Index symbols
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
-          description: Invalid timeframe or count
+          description: Invalid timeframe/count or explicit symbol is not uniquely verified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '502':
           description: Deriv upstream error or no completed valid candles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Server-side SQAO_ACTION_KEY is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /analysis/snapshot:
     get:
       operationId: getSQAOQuantSnapshot
-      summary: Retrieve the complete six-timeframe SQAO research audit
+      summary: Retrieve the six-timeframe SQAO research audit
       description: >-
-        Resolves AUTO against active Step Index symbols and retrieves closed
+        Resolves the exact active Step Index symbol and retrieves closed
         D1/H4/H1/M15/M5/M1 candles. Returns data quality, MTF synchronization
         and integrity gates. Candidate confirmation is review-only and never
-        authorizes execution. The API enforces NO_TRADE and execution_eligible=false.
+        authorizes execution. The API enforces NO_TRADE and
+        execution_eligible=false. AUTO ambiguity returns HTTP 409.
+      x-sqao-operation-class: read_only_research
       security:
         - SQAOHeaderKey: []
       parameters:
         - name: symbol
           in: query
           required: false
-          schema: {type: string, default: AUTO}
+          description: Exact active Step Index symbol, or AUTO when resolution is unique.
+          schema:
+            type: string
+            default: AUTO
         - name: count
           in: query
           required: false
-          schema: {type: integer, minimum: 20, maximum: 500, default: 500}
+          schema:
+            type: integer
+            minimum: 20
+            maximum: 500
+            default: 500
       responses:
         '200':
           description: Read-only multi-timeframe research snapshot
@@ -129,12 +168,34 @@ paths:
                 $ref: '#/components/schemas/Snapshot'
         '401':
           description: Missing or invalid SQAO API key
-        '503':
-          description: Server-side SQAO_ACTION_KEY is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: AUTO or configured preference resolves to multiple active Step Index symbols
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
-          description: Invalid count
+          description: Invalid count or explicit symbol is not uniquely verified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '502':
           description: Deriv upstream error or insufficient candle history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Server-side SQAO_ACTION_KEY is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   securitySchemes:
     SQAOHeaderKey:
@@ -142,64 +203,257 @@ components:
       in: header
       name: X-SQAO-Key
   schemas:
+    Error:
+      type: object
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
+    StepSymbol:
+      type: object
+      required: [symbol, display_name]
+      properties:
+        symbol:
+          type: string
+        display_name:
+          type: string
+    ActiveSymbols:
+      type: object
+      required: [symbols, count, source]
+      properties:
+        symbols:
+          type: array
+          items:
+            $ref: '#/components/schemas/StepSymbol'
+        count:
+          type: integer
+          minimum: 0
+        source:
+          type: string
     Candle:
       type: object
       required: [epoch, open, high, low, close]
       properties:
-        epoch: {type: integer, description: Unix epoch of candle start}
-        open: {type: number}
-        high: {type: number}
-        low: {type: number}
-        close: {type: number}
+        epoch:
+          type: integer
+          description: Unix epoch of candle start; candle is fully closed.
+        open:
+          type: number
+        high:
+          type: number
+        low:
+          type: number
+        close:
+          type: number
+    TimeframeStatus:
+      type: object
+      required: [rows, latest_candle_epoch, age_seconds, max_age_seconds, effective_max_age_seconds, fresh]
+      properties:
+        rows:
+          type: integer
+        latest_candle_epoch:
+          type: [integer, 'null']
+        age_seconds:
+          type: [integer, 'null']
+        max_age_seconds:
+          type: integer
+        effective_max_age_seconds:
+          type: integer
+        fresh:
+          type: boolean
     Health:
       type: object
+      required:
+        - status
+        - service
+        - version
+        - mtf_sync_version
+        - required_timeframes
+        - read_only
+        - background_connector_enabled
+        - background_connector_running
+        - background_connector_started_at_utc
+        - background_connector_error
+        - market_data
       properties:
-        status: {type: string, enum: [ok, degraded]}
-        service: {type: string}
-        version: {type: string}
-        mtf_sync_version: {type: string}
+        status:
+          type: string
+          enum: [ok, degraded]
+        service:
+          type: string
+        version:
+          type: string
+        mtf_sync_version:
+          type: string
         required_timeframes:
           type: array
-          items: {type: string}
-        read_only: {type: boolean}
-        background_connector_enabled: {type: boolean}
-        background_connector_running: {type: boolean}
-        background_connector_started_at_utc: {type: [string, 'null']}
-        background_connector_error: {type: [string, 'null']}
+          items:
+            type: string
+            enum: [D1, H4, H1, M15, M5, M1]
+        read_only:
+          type: boolean
+          const: true
+        background_connector_enabled:
+          type: boolean
+        background_connector_running:
+          type: boolean
+        background_connector_started_at_utc:
+          type: [string, 'null']
+          format: date-time
+        background_connector_error:
+          type: [string, 'null']
         market_data:
           type: object
+          required: [timeframes, max_data_age_seconds, all_timeframes_fresh]
           properties:
-            timeframes: {type: object, additionalProperties: true}
-            max_data_age_seconds: {type: integer}
-            all_timeframes_fresh: {type: boolean}
+            timeframes:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/TimeframeStatus'
+            max_data_age_seconds:
+              type: integer
+            all_timeframes_fresh:
+              type: boolean
+    OHLCResponse:
+      type: object
+      required:
+        - symbol
+        - symbol_resolution
+        - timeframe
+        - granularity_seconds
+        - count
+        - latest_closed_epoch
+        - latest_closed_utc
+        - candles
+        - source
+        - read_only
+      properties:
+        symbol:
+          type: string
+        symbol_resolution:
+          type: string
+          enum: [EXPLICIT, AUTO_PREFERRED, AUTO_UNIQUE]
+        timeframe:
+          type: string
+          enum: [M1, M5, M15, H1, H4, D1]
+        granularity_seconds:
+          type: integer
+        count:
+          type: integer
+        latest_closed_epoch:
+          type: integer
+        latest_closed_utc:
+          type: string
+          format: date-time
+        candles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Candle'
+        source:
+          type: string
+        read_only:
+          type: boolean
+          const: true
+    Gate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [PASS, BLOCKED]
+        blockers:
+          type: array
+          items:
+            type: string
+        policy:
+          type: string
+      additionalProperties: true
     Snapshot:
       type: object
-      required: [api_version, integrity_gate, mtf_sync_gate, symbol, source, read_only, decision, execution_eligible, cost_gate, data_quality, timeframes, candles, generated_at_utc]
+      required:
+        - api_version
+        - integrity_gate
+        - mtf_sync_version
+        - mtf_sync_gate
+        - mtf_sync_passed
+        - symbol
+        - source
+        - read_only
+        - decision
+        - execution_eligible
+        - cost_gate
+        - data_complete
+        - data_quality
+        - timeframes
+        - candles
+        - generated_at_utc
       properties:
-        api_version: {type: string}
-        integrity_gate: {type: object, additionalProperties: true}
-        mtf_sync_version: {type: string}
-        mtf_sync_gate: {type: object, additionalProperties: true}
-        mtf_sync_passed: {type: boolean}
-        engine: {type: string}
-        symbol: {type: string}
-        symbol_resolution: {type: string}
-        source: {type: string}
-        read_only: {type: boolean, const: true}
-        decision: {type: string, enum: [NO_TRADE]}
-        candidate_setup: {type: object, additionalProperties: true}
-        candidate_confirmed: {type: boolean}
-        execution_eligible: {type: boolean, const: false}
-        cost_gate: {type: string}
-        decision_epoch: {type: [integer, 'null']}
-        next_m1_open: {type: [object, 'null'], additionalProperties: true}
-        data_complete: {type: boolean}
-        data_quality: {type: object, additionalProperties: true}
-        timeframes: {type: object, additionalProperties: true}
+        api_version:
+          type: string
+          const: 2.6.0
+        integrity_gate:
+          $ref: '#/components/schemas/Gate'
+        mtf_sync_version:
+          type: string
+        mtf_sync_gate:
+          $ref: '#/components/schemas/Gate'
+        mtf_sync_passed:
+          type: boolean
+        engine:
+          type: string
+        symbol:
+          type: string
+        symbol_resolution:
+          type: string
+          enum: [EXPLICIT, AUTO_PREFERRED, AUTO_UNIQUE]
+        source:
+          type: string
+        read_only:
+          type: boolean
+          const: true
+        decision:
+          type: string
+          enum: [NO_TRADE]
+        candidate_setup:
+          type: object
+          additionalProperties: true
+        candidate_confirmed:
+          type: boolean
+        execution_eligible:
+          type: boolean
+          const: false
+        cost_gate:
+          type: string
+        decision_epoch:
+          type: [integer, 'null']
+        next_m1_open:
+          type: [object, 'null']
+          additionalProperties: true
+        data_complete:
+          type: boolean
+        data_quality:
+          type: object
+          additionalProperties: true
+        timeframes:
+          type: object
+          additionalProperties: true
         candles:
           type: object
           additionalProperties:
             type: array
-            items: {$ref: '#/components/schemas/Candle'}
-        generated_at_utc: {type: string, format: date-time}
-        note: {type: string}
+            items:
+              $ref: '#/components/schemas/Candle'
+        generated_at_utc:
+          type: string
+          format: date-time
+        note:
+          type: string
+        v35_research:
+          type: object
+          additionalProperties: true
