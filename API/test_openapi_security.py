@@ -101,7 +101,7 @@ class OpenAPIContractTests(unittest.TestCase):
         self.assertIn("name: X-SQAO-Key", self.text)
         self.assertIn("type: apiKey", self.text)
         self.assertIn("in: header", self.text)
-        self.assertNotRegex(self.text, r"(?m)^\s*name: X-SQAO-Key\s*\n\s*in: query")
+        self.assertNotRegex(self.text, r"(?m)^\s*- name: X-SQAO-Key\s*$")
 
     def test_contract_declares_no_request_bodies_or_trading_paths(self):
         self.assertNotIn("requestBody:", self.text)
