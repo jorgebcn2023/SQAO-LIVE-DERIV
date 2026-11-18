@@ -1,0 +1,49 @@
+{
+  "plugin_id": "SQAO_LIVE_DERIV",
+  "name": "SQAO LIVE DERIV",
+  "version": "3.2.1",
+  "release_channel": "candidate",
+  "language": "es",
+  "domain": "quantitative_market_analysis",
+  "objective": "Auditoría cuantitativa y visual multitemporal de Step Index en Deriv; investigación y evaluación de scalping sin ejecución.",
+  "runtime": {
+    "mode": "READ_ONLY",
+    "research_only": true,
+    "execution_enabled": false,
+    "decision_default": "NO_TRADE",
+    "execution_eligible_default": false
+  },
+  "api": {
+    "service_version": "2.6.0",
+    "openapi_file": "GPT/openapi.yaml",
+    "base_url": "https://sqao-live-api-v2.onrender.com",
+    "auth_header": "X-SQAO-Key",
+    "health_is_public": true,
+    "allowed_methods": ["GET"],
+    "allowed_operations": ["health", "getActiveStepSymbols", "getStepOHLC", "getSQAOQuantSnapshot"],
+    "forbidden_capabilities": ["place_order", "buy", "sell", "modify_order", "cancel_order", "account_balance", "withdrawal"]
+  },
+  "timeframes": ["D1", "H4", "H1", "M15", "M5", "M1"],
+  "timeframe_roles": {
+    "D1": "macro_context",
+    "H4": "higher_timeframe_context",
+    "H1": "trend_context",
+    "M15": "market_structure",
+    "M5": "setup_validation",
+    "M1": "timing_observation"
+  },
+  "visual_engine": {
+    "module": "ENGINE.chart_visual_intelligence_v32",
+    "status": "conservative_ocr_evidence_intake",
+    "indicators": ["EMA", "Bollinger", "RSI", "MACD", "ADX", "+DI", "-DI", "Stochastic"],
+    "numeric_curve_attribution": "not_validated",
+    "ohlc_reconstruction_from_pixels": false
+  },
+  "provenance_classes": ["VISUAL_RAW", "API_RAW", "DERIVED", "INFERENCE"],
+  "release_gates": ["image_integrity", "ocr_quality", "mtf_metadata", "api_integrity", "reconciliation", "costs", "out_of_sample"],
+  "install": {
+    "instructions": "PLUGIN/SQAO_LIVE_DERIV_V3.2.1/INSTRUCTIONS.md",
+    "readme": "PLUGIN/SQAO_LIVE_DERIV_V3.2.1/README.md",
+    "schema": "PLUGIN/SQAO_LIVE_DERIV_V3.2.1/schemas/visual-audit.schema.json"
+  }
+}
