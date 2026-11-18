@@ -66,11 +66,15 @@ def audit_mtf_closed_frames(frames: dict[str, list[dict[str, Any]]], *, symbol: 
             "mtf_sync_claim": "NOT_EVALUATED_BY_ALT_MODULE",
         }
     statuses = [results.get(tf, {}).get("status", "MISSING") for tf in REQUIRED_TIMEFRAMES]
-    all_complete = all(s == "COMPLETED_RESEARCH_ONLY" for s in statuses)
+    all_complete = all(
+        results.get(tf, {}).get("status") == "COMPLETED_RESEARCH_ONLY"
+        and results.get(tf, {}).get("received_closed_candles") == expected_count
+        for tf in REQUIRED_TIMEFRAMES
+    )
     return {
         "module": "SQAO_V3.2.1_ALT_STOCHASTIC",
         "status": "COMPLETED_RESEARCH_ONLY" if all_complete else "PARTIAL_OR_BLOCKED",
-        "symbol": symbol, "timeframes": results, "mtf_sync_verified": False,
+        "symbol": symbol, "timeframes": results, "sample_coverage_complete": all_complete, "mtf_sync_verified": False,
         "decision": "NO_TRADE", "execution_eligible": False,
         "account_access": False, "trade_execution": False,
         "note": "Independent timeframe diagnostics only. No signal, win probability, synchronization claim, or execution authorization is produced.",
