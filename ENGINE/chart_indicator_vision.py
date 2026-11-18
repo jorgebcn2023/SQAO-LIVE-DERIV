@@ -212,6 +212,87 @@ def _attach_legend_identity(traces: list[dict[str, Any]], legend: dict[str, Any]
         trace["legend_identity_status"] = "MATCHED" if len(matches)==1 else ("AMBIGUOUS" if matches else "UNMAPPED")
 
 
+
+def auto_detect_indicator_panes(path: str | Path) -> dict[str, Any]:
+    """Label-guided pane localization. Unlabelled panels are never guessed."""
+    cv2, np = _load_cv()
+    try:
+        import pytesseract
+        from pytesseract import Output
+    except Exception as exc:
+        return {"status": "OCR_UNAVAILABLE", "pane_rois": {}, "reason": type(exc).__name__}
+    image = cv2.imread(str(path))
+    if image is None:
+        return {"status": "IMAGE_UNREADABLE", "pane_rois": {}}
+    height, width = image.shape[:2]
+    data = pytesseract.image_to_data(image, output_type=Output.DICT, config="--psm 11")
+    lines: dict[tuple, list[int]] = {}
+    for i, raw in enumerate(data.get("text", [])):
+        token = str(raw).strip()
+        try:
+            conf = float(data["conf"][i])
+        except Exception:
+            conf = -1
+        if not token or conf < 35:
+            continue
+        if int(data["left"][i]) > width * 0.68:
+            continue
+        key = (data.get("block_num",[0])[i], data.get("par_num",[0])[i], data.get("line_num",[0])[i])
+        lines.setdefault(key, []).append(i)
+    patterns = {
+        "EMA": r"\bema\b|exponential moving average",
+        "BOLLINGER": r"bollinger|bands",
+        "RSI": r"\brsi\b|relative strength index",
+        "MACD": r"\bmacd\b|moving average convergence",
+        "ADX": r"\badx\b|average directional",
+        "STOCHASTIC": r"stoch",
+    }
+    found = []
+    for ids in lines.values():
+        text = " ".join(str(data["text"][i]).strip() for i in ids)
+        matched = [name for name, pattern in patterns.items() if re.search(pattern, text, re.I)]
+        if not matched:
+            continue
+        cy = sum(int(data["top"][i]) + int(data["height"][i])/2 for i in ids)/len(ids)
+        confs = []
+        for i in ids:
+            try: confs.append(float(data["conf"][i]))
+            except Exception: pass
+        found.append({"labels": matched, "text": text, "center_y": cy,
+                      "confidence": sum(confs)/len(confs) if confs else 0})
+    if not found:
+        return {"status": "NO_LABEL_CONFIRMED_PANES", "pane_rois": {}, "labels": []}
+    found.sort(key=lambda item: item["center_y"])
+    clusters = []
+    for item in found:
+        if clusters and item["center_y"] - clusters[-1]["center_y"] <= max(28, height*0.035):
+            cluster = clusters[-1]
+            cluster["items"].append(item)
+            cluster["center_y"] = sum(x["center_y"] for x in cluster["items"])/len(cluster["items"])
+        else:
+            clusters.append({"center_y": item["center_y"], "items": [item]})
+    rois: dict[str, list[int]] = {}
+    for i, cluster in enumerate(clusters):
+        top = 0 if i == 0 else int((clusters[i-1]["center_y"]+cluster["center_y"])/2)
+        bottom = height if i == len(clusters)-1 else int((cluster["center_y"]+clusters[i+1]["center_y"])/2)
+        if bottom <= top:
+            continue
+        for item in cluster["items"]:
+            for name in item["labels"]:
+                if name in rois:
+                    # Multiple label clusters for one indicator are ambiguous.
+                    rois.pop(name, None)
+                    continue
+                rois[name] = [0, top, width, bottom-top]
+    labels = [{"text": item["text"], "labels": item["labels"],
+               "center_y": round(item["center_y"],1), "ocr_confidence": round(item["confidence"],1)}
+              for item in found]
+    return {"status": "LABEL_GUIDED" if rois else "AMBIGUOUS_LABEL_LAYOUT",
+            "pane_rois": rois, "labels": labels,
+            "method": "OCR_LABEL_Y_CLUSTERING; panel boundaries are midpoint estimates",
+            "confidence": "HEURISTIC_REQUIRES_OPERATOR_REVIEW"}
+
+
 def analyze_indicator_panes(path: str | Path, timeframe: str | None,
                             pane_rois: dict[str, list[int]] | None = None,
                             legend_roi: list[int] | None = None) -> dict[str, Any]:
@@ -222,6 +303,16 @@ def analyze_indicator_panes(path: str | Path, timeframe: str | None,
     if image is None:
         return {"status": "IMAGE_UNREADABLE", "timeframe": timeframe, "panes": {}}
     height, width = image.shape[:2]
+    auto_layout = {"status": "OPERATOR_CONFIGURED", "pane_rois": pane_rois or {}}
+    if not pane_rois:
+        try:
+            auto_layout = auto_detect_indicator_panes(p)
+            pane_rois = auto_layout.get("pane_rois") or {}
+        except Exception as exc:
+            auto_layout = {"status": "AUTO_DETECTION_FAILED", "pane_rois": {}, "reason": type(exc).__name__}
+            pane_rois = {}
+    if legend_roi is None and auto_layout.get("status") == "LABEL_GUIDED":
+        legend_roi = [0, 0, int(width*0.68), height]
     legend = _ocr_legend_colors(p, legend_roi)
     panes: dict[str, Any] = {}
     for raw_name, roi in (pane_rois or {}).items():
@@ -263,7 +354,8 @@ def analyze_indicator_panes(path: str | Path, timeframe: str | None,
         "module": "SQAO_CHART_INDICATOR_VISION", "version": VERSION,
         "timeframe": timeframe, "image_size": [width, height],
         "legend_color_mapping": legend,
-        "status": "ANALYZED" if panes else "PANE_ROIS_REQUIRED",
+        "pane_layout_detection": auto_layout,
+        "status": "ANALYZED" if panes else ("PANE_LABELS_NOT_RECOGNIZED" if auto_layout.get("status") == "NO_LABEL_CONFIRMED_PANES" else "PANE_ROIS_REQUIRED"),
         "panes": panes,
         "limitations": [
             "Color traces are image-space observations, not exact indicator values.",
