@@ -181,3 +181,5 @@ The existing OCR engine is extended (not duplicated) by ENGINE/chart_indicator_v
 - Optional GPT Vision argument: visual_panes, keyed by uploaded image label.
 
 Run tests: python -m ENGINE.test_chart_indicator_vision.
+
+The optional `legend_roi=[x,y,width,height]` reads indicator labels and estimates each label's text hue. Pane-axis OCR independently calibrates the right-side numeric scale when at least two readable labels exist. Any mapped line identity or oscillator zone remains `VISUAL_ESTIMATE`; unresolved colors, labels or scales remain unclassified. EMA stack order is reported only with verified EMA9/20/50 legend matches.
