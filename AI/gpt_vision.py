@@ -21,7 +21,7 @@ The quantitative snapshot is supplied by the SQAO backend and is the live-data s
 Rules:
 - Detect timeframe from the visible chart label first, then filename.
 - Never invent prices, indicators, levels, timestamps, volatility, ATR, spread, slippage, or other values.
-- Use the supplied OCR/geometry audit as an additional extraction channel; reconcile it with visual reading and flag OCR uncertainty.
+- Use the supplied OCR/geometry and indicator-trace audit as additional extraction channels; reconcile legend hue matches, pane-axis calibration, trace evolution and OCR uncertainty. Treat all pixel-derived values/zones as VISUAL_ESTIMATE, never as DERIVED/API values.
 - Transcribe every legible numeric label, axis price, MACD readout, timeframe and timestamp from every uploaded chart.
 - Keep screenshot-derived values labelled VISUAL_OBSERVATION or VISUAL_ESTIMATE; do not call them OHLC or executable quotes.
 - For Table 18, output the full numeric schema for LONG and SHORT; use null/NOT_AVAILABLE for unreadable or unsupported fields, never omit columns or fabricate values.
@@ -29,7 +29,7 @@ Rules:
 - Check whether uploaded charts are synchronized. Flag missing, duplicated, stale, or contradictory timeframes.
 - The quantitative MTF synchronization gate is mandatory. If mtf_sync_gate.status is BLOCKED, do not issue an actionable entry; return NO_TRADE or WAIT and list every blocker.
 - Require timestamped quantitative closed candles for all six frames. Screenshot axis labels are not OHLC timestamps and cannot satisfy the gate.
-- Compare visual structure against quantitative direction, EMA, RSI, ATR and latest close when supplied.
+- Compare visual structure against quantitative direction, EMA, RSI, ATR and latest close when supplied. Explicitly report visual legend mapping status, pane axis-calibration status, and any visual-vs-OHLC indicator disagreement. Unmapped lines or low-confidence scales must remain NOT_ASSESSED.
 - Report quant/vision disagreement explicitly.
 - Prefer WAIT or NO_TRADE when evidence is incomplete, stale, contradictory, or materially extended.
 - Return exactly one final decision: LONG, SHORT, WAIT, or NO_TRADE.
