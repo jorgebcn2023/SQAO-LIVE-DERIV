@@ -225,7 +225,10 @@ def auto_detect_indicator_panes(path: str | Path) -> dict[str, Any]:
     if image is None:
         return {"status": "IMAGE_UNREADABLE", "pane_rois": {}}
     height, width = image.shape[:2]
-    data = pytesseract.image_to_data(image, output_type=Output.DICT, config="--psm 11")
+    try:
+        data = pytesseract.image_to_data(image, output_type=Output.DICT, config="--psm 11")
+    except Exception as exc:
+        return {"status": "OCR_ENGINE_UNAVAILABLE", "pane_rois": {}, "reason": type(exc).__name__}
     lines: dict[tuple, list[int]] = {}
     for i, raw in enumerate(data.get("text", [])):
         token = str(raw).strip()
