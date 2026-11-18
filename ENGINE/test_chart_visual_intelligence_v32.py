@@ -102,7 +102,7 @@ class VisualIntelligenceV32Tests(unittest.TestCase):
             path = Path(directory) / "panels.png"
             image = Image.new("RGB", (320, 200), "white")
             draw = ImageDraw.Draw(image)
-            draw.line((0, 100, 319, 100), fill="black", width=2)
+            draw.line((0, 100, 319, 100), fill="black", width=1)
             image.save(path)
             result = detect_panel_regions(path)
         self.assertEqual(result["status"], "GEOMETRY_DETECTED")
@@ -126,6 +126,27 @@ class VisualIntelligenceV32Tests(unittest.TestCase):
             Image.new("RGB", (20, 20), "white").save(path)
             with self.assertRaises(ValueError):
                 detect_panel_regions(path, row_coverage=1.5)
+
+
+    def test_dark_theme_background_is_not_misread_as_separator(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dark-theme.png"
+            Image.new("RGB", (320, 200), (20, 20, 20)).save(path)
+            result = detect_panel_regions(path)
+        self.assertEqual(result["status"], "GEOMETRY_DETECTED")
+        self.assertEqual(result["separator_count"], 0)
+        self.assertEqual(len(result["panels"]), 1)
+
+    def test_v321_engine_schema_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.bin"
+            path.write_bytes(b"not-an-image")
+            result = audit_image(path, "M1")
+        self.assertEqual(result["schema_version"], "3.2.1")
 
     def test_negative_skew_tolerance_rejected(self):
         with self.assertRaises(ValueError):
