@@ -6,7 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from ENGINE.chart_indicator_vision import analyze_indicator_panes, _trend
+from ENGINE.chart_indicator_vision import analyze_indicator_panes, _trend, _attach_legend_identity, _semantic_observations
 
 
 class IndicatorVisionTests(unittest.TestCase):
@@ -29,6 +29,25 @@ class IndicatorVisionTests(unittest.TestCase):
         self.assertEqual(result["panes"]["RSI"]["status"], "TRACES_FOUND")
         self.assertGreaterEqual(result["panes"]["RSI"]["trace_count"], 1)
         self.assertEqual(result["panes"]["RSI"]["association"], "OPERATOR_CONFIGURED_PANE; indicator identity is not inferred from color")
+
+
+    def test_legend_hue_maps_to_line_identity(self):
+        traces = [{"hue_center_hsv": 30, "points": [{"x_norm": 1.0, "y_norm": 0.4}],
+                   "evolution": {"status": "TRACE_OBSERVED", "direction": "RISING"},
+                   "coverage": 0.9}]
+        legend = {"status": "MAPPED", "labels": {"EMA_9": {"hue_center_hsv": 32}}}
+        _attach_legend_identity(traces, legend)
+        self.assertEqual(traces[0]["legend_identity"]["line_id"], "EMA_9")
+        self.assertEqual(traces[0]["legend_identity_status"], "MATCHED")
+
+    def test_rsi_visual_zone_requires_axis_value(self):
+        traces = [{"hue_center_hsv": 80, "coverage": 0.8,
+                   "legend_identity": {"line_id": "RSI"},
+                   "evolution": {"status": "TRACE_OBSERVED", "direction": "RISING"},
+                   "points": [{"x_norm": 1.0, "y_norm": 0.1, "axis_value_estimate": 74.2}]}]
+        result = _semantic_observations("RSI", traces, {"status": "CALIBRATED"})
+        self.assertEqual(result["latest_zone_visual_estimate"], "OVERBOUGHT_ABOVE_70")
+        self.assertTrue(result["numeric_readings_are_visual_estimates"])
 
     def test_missing_rois_does_not_guess_indicators(self):
         with tempfile.TemporaryDirectory() as tmp:
