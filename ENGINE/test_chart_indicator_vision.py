@@ -73,5 +73,27 @@ class IndicatorVisionTests(unittest.TestCase):
         self.assertEqual(result["panes"], {})
 
 
+    def test_low_confidence_axis_never_emits_numeric_zone(self):
+        traces = [{"hue_center_hsv": 80, "coverage": 0.8,
+                   "legend_identity": {"line_id": "RSI"},
+                   "evolution": {"status": "TRACE_OBSERVED", "direction": "RISING"},
+                   "points": [{"x_norm": 1.0, "y_norm": 0.1,
+                               "axis_value_estimate": 74.2}]}]
+        result = _semantic_observations("RSI", traces, {"status": "LOW_CONFIDENCE"})
+        self.assertNotIn("latest_zone_visual_estimate", result)
+        self.assertEqual(result["scale_status"], "LOW_CONFIDENCE")
+
+    def test_low_confidence_axis_never_emits_ema_stack(self):
+        traces = []
+        for name, value in (("EMA_9", 105.0), ("EMA_20", 103.0), ("EMA_50", 100.0)):
+            traces.append({"hue_center_hsv": 30, "coverage": 0.8,
+                           "legend_identity": {"line_id": name},
+                           "evolution": {"status": "TRACE_OBSERVED", "direction": "RISING"},
+                           "points": [{"x_norm": 1.0, "y_norm": 0.2,
+                                       "axis_value_estimate": value}]})
+        result = _semantic_observations("EMA", traces, {"status": "LOW_CONFIDENCE"})
+        self.assertEqual(result["ema_stack_order"], "NOT_ASSESSED")
+
+
 if __name__ == "__main__":
     unittest.main()
