@@ -183,3 +183,6 @@ The existing OCR engine is extended (not duplicated) by ENGINE/chart_indicator_v
 Run tests: python -m ENGINE.test_chart_indicator_vision.
 
 The optional `legend_roi=[x,y,width,height]` reads indicator labels and estimates each label's text hue. Pane-axis OCR independently calibrates the right-side numeric scale when at least two readable labels exist. Any mapped line identity or oscillator zone remains `VISUAL_ESTIMATE`; unresolved colors, labels or scales remain unclassified. EMA stack order is reported only with verified EMA9/20/50 legend matches.
+
+
+Automatic panel localization now runs when pane ROIs are not supplied. It uses OCR-visible indicator labels and estimates panel bounds from label positions; it does not classify unlabeled panels. Automatic ROIs are marked heuristic and require operator review. Explicit pane ROIs override this detection.
