@@ -17,6 +17,13 @@ class StochasticAltTests(unittest.TestCase):
         self.assertFalse(result["execution_eligible"])
         self.assertEqual(result["status"],"PARTIAL_OR_BLOCKED")
 
+    def test_sample_shortfall_is_reported_as_partial(self):
+        rows=[{"epoch":1000000+i*60,"open":100+i,"high":101+i,"low":99+i,"close":100.5+i} for i in range(120)]
+        result=audit_mtf_closed_frames({"M1":rows},symbol="TEST",generated_at_utc="2026-11-18T00:00:00Z",expected_count=500)
+        self.assertEqual(result["status"],"PARTIAL_OR_BLOCKED")
+        self.assertFalse(result["sample_coverage_complete"])
+        self.assertEqual(result["timeframes"]["M1"]["sample_shortfall"],380)
+
     def test_gap_blocks_frame(self):
         rows=[{"epoch":1000000+i*60+(60 if i>5 else 0),"open":100+i,"high":101+i,"low":99+i,"close":100.5+i} for i in range(120)]
         result=audit_mtf_closed_frames({"M1":rows},symbol="TEST",generated_at_utc="2026-11-18T00:00:00Z")
