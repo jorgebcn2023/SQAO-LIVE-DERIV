@@ -56,3 +56,9 @@ ROI coordinates are [x, y, width, height] in original image pixels. Configure ac
 EMA9/20/50, +DI/-DI and signal-line identities are not assigned from color alone; verified legend-color mapping is required. Pixel direction is not an exact price or indicator value. No screenshot-derived OHLC is created.
 
 The OpenCV module is ENGINE/chart_indicator_vision.py. Run tests with python -m ENGINE.test_chart_indicator_vision. The GPT vision entry point accepts an optional visual_panes mapping keyed by uploaded image label.
+
+### Legend and scale recognition extension
+
+Pass `legend_roi=[x,y,width,height]` alongside `pane_rois` for a chart-level indicator legend. OCR groups legend text, then samples the rendered text hue and associates it with trace hues only within a conservative hue tolerance. Unmatched or ambiguous identities remain null. Each configured pane also attempts OCR calibration from numeric labels in its rightmost 28%; a calibration needs at least two distinct labels and is tagged `CALIBRATED` or `LOW_CONFIDENCE`. Pixel-to-value points are `VISUAL_ESTIMATE_FROM_OCR_AXIS`, never API/DERIVED values.
+
+When the scale and legend both pass, RSI/Stochastic/ADX/MACD can receive a visual threshold/zero-line classification; EMA9/20/50 stack order is reported only if all three legend identities are independently mapped. These classifications are not quantitative signals and must not alter the OHLC engine decision.
