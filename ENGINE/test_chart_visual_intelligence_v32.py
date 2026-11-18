@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ENGINE.chart_visual_intelligence_v32 import audit_image, audit_mtf
+from ENGINE.chart_visual_intelligence_v32 import audit_image, audit_mtf, detect_panel_regions
 
 STAMP = "2026-11-18T00:00:00Z"
 FRAMES = ("D1", "H4", "H1", "M15", "M5", "M1")
@@ -91,6 +91,41 @@ class VisualIntelligenceV32Tests(unittest.TestCase):
         result = audit_mtf(frames)
         self.assertEqual(result["status"], "BLOCKED")
         self.assertEqual(result["invalid_timestamps"], ["M1"])
+
+
+    def test_panel_geometry_detects_full_width_separator_without_classifying(self):
+        try:
+            from PIL import Image, ImageDraw
+        except ImportError:
+            self.skipTest("Pillow unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "panels.png"
+            image = Image.new("RGB", (320, 200), "white")
+            draw = ImageDraw.Draw(image)
+            draw.line((0, 100, 319, 100), fill="black", width=2)
+            image.save(path)
+            result = detect_panel_regions(path)
+        self.assertEqual(result["status"], "GEOMETRY_DETECTED")
+        self.assertGreaterEqual(len(result["panels"]), 2)
+        self.assertEqual(result["classification"], "UNCLASSIFIED")
+        self.assertEqual(result["curve_attribution"], "NOT_PERFORMED")
+        self.assertEqual(result["provenance"], "VISUAL_RAW")
+
+    def test_panel_geometry_missing_file_fails_closed(self):
+        result = detect_panel_regions("missing-panel-image.png")
+        self.assertEqual(result["status"], "FILE_NOT_FOUND")
+        self.assertEqual(result["panels"], [])
+
+    def test_panel_geometry_rejects_invalid_threshold(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "valid.png"
+            Image.new("RGB", (20, 20), "white").save(path)
+            with self.assertRaises(ValueError):
+                detect_panel_regions(path, row_coverage=1.5)
 
     def test_negative_skew_tolerance_rejected(self):
         with self.assertRaises(ValueError):
