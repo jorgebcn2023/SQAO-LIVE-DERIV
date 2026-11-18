@@ -338,7 +338,7 @@ def analyze_indicator_panes(path: str | Path, timeframe: str | None,
             scale = _axis_scale(image, [x0, y0, x1-x0, y1-y0])
         except Exception as exc:
             scale = {"status": "AXIS_OCR_FAILED", "reason": type(exc).__name__}
-        if scale.get("status") in ("CALIBRATED", "LOW_CONFIDENCE"):
+        if scale.get("status") == "CALIBRATED":
             for trace in traces:
                 for point in trace["points"]:
                     py = y0 + point["y_norm"] * max(1, y1-y0-1)
@@ -397,7 +397,7 @@ def _semantic_observations(name: str, traces: list[dict[str, Any]],
         else:
             base["ema_stack_order"] = "NOT_ASSESSED"
     if name in ("RSI", "STOCHASTIC", "ADX", "MACD"):
-        latest = [x for x in matched if x["last_axis_value_estimate"] is not None]
+        latest = [x for x in matched if x["last_axis_value_estimate"] is not None] if scale.get("status") == "CALIBRATED" else []
         if name == "RSI" and latest:
             v = latest[0]["last_axis_value_estimate"]
             base["latest_zone_visual_estimate"] = "OVERBOUGHT_ABOVE_70" if v >= 70 else "OVERSOLD_BELOW_30" if v <= 30 else "MID_RANGE"
