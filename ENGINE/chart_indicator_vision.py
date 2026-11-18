@@ -129,7 +129,7 @@ def analyze_indicator_panes(path: str | Path, timeframe: str | None,
             "trace_count": len(traces),
             "axis_calibration": scale,
             "traces": traces,
-            "indicator_specific_observations": _indicator_observations(name, traces),
+            "indicator_specific_observations": _semantic_observations(name, traces, scale),
         }
     return {
         "module": "SQAO_CHART_INDICATOR_VISION", "version": VERSION,
@@ -146,6 +146,50 @@ def analyze_indicator_panes(path: str | Path, timeframe: str | None,
             "Color themes, anti-aliasing, overlapping traces and chart zoom can reduce detection reliability.",
         ],
     }
+
+
+
+def _semantic_observations(name: str, traces: list[dict[str, Any]],
+                           scale: dict[str, Any]) -> dict[str, Any]:
+    base = _indicator_observations(name, traces)
+    matched = []
+    for trace in traces:
+        identity = trace.get("legend_identity")
+        if identity and trace.get("points"):
+            matched.append({
+                "line_id": identity["line_id"],
+                "direction": trace["evolution"].get("direction"),
+                "coverage": trace.get("coverage"),
+                "last_axis_value_estimate": trace["points"][-1].get("axis_value_estimate"),
+            })
+    base["legend_matched_lines"] = matched
+    base["legend_mapping_status"] = "PARTIAL_OR_COMPLETE" if matched else "UNMAPPED"
+    if name == "EMA":
+        levels = {x["line_id"]: x for x in matched}
+        required = ("EMA_9", "EMA_20", "EMA_50")
+        if all(k in levels and levels[k]["last_axis_value_estimate"] is not None for k in required):
+            a,b,d = (levels[k]["last_axis_value_estimate"] for k in required)
+            base["ema_stack_order"] = ("BULLISH_9_GT_20_GT_50" if a>b>d else
+                                       "BEARISH_9_LT_20_LT_50" if a<b<d else "MIXED")
+        else:
+            base["ema_stack_order"] = "NOT_ASSESSED"
+    if name in ("RSI", "STOCHASTIC", "ADX", "MACD"):
+        latest = [x for x in matched if x["last_axis_value_estimate"] is not None]
+        if name == "RSI" and latest:
+            v = latest[0]["last_axis_value_estimate"]
+            base["latest_zone_visual_estimate"] = "OVERBOUGHT_ABOVE_70" if v >= 70 else "OVERSOLD_BELOW_30" if v <= 30 else "MID_RANGE"
+        elif name == "STOCHASTIC" and latest:
+            v = latest[0]["last_axis_value_estimate"]
+            base["latest_zone_visual_estimate"] = "OVERBOUGHT_ABOVE_80" if v >= 80 else "OVERSOLD_BELOW_20" if v <= 20 else "MID_RANGE"
+        elif name == "ADX" and latest:
+            v = latest[0]["last_axis_value_estimate"]
+            base["latest_strength_zone_visual_estimate"] = "STRONG_ABOVE_25" if v >= 25 else "WEAK_OR_TRENDLESS_BELOW_20" if v < 20 else "INTERMEDIATE"
+        elif name == "MACD" and latest:
+            v = latest[0]["last_axis_value_estimate"]
+            base["zero_line_position_visual_estimate"] = "ABOVE_ZERO" if v > 0 else "BELOW_ZERO" if v < 0 else "AT_ZERO"
+    base["numeric_readings_are_visual_estimates"] = True
+    base["scale_status"] = scale.get("status", "NOT_AVAILABLE")
+    return base
 
 
 def _indicator_observations(name: str, traces: list[dict[str, Any]]) -> dict[str, Any]:
