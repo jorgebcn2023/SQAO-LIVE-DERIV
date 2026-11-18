@@ -162,7 +162,7 @@ def _extract_indicator_readings(text: str) -> dict[str, Any]:
     return result
 
 
-def audit_chart(path: str | Path, timeframe: str | None = None) -> dict[str, Any]:
+def audit_chart(path: str | Path, timeframe: str | None = None, visual_panes: dict[str, list[int]] | None = None, legend_roi: list[int] | None = None) -> dict[str, Any]:
     p = Path(path)
     if not p.is_file():
         return {"source": str(p), "status": "FILE_NOT_FOUND"}
@@ -185,8 +185,14 @@ def audit_chart(path: str | Path, timeframe: str | None = None) -> dict[str, Any
     calibration = _axis_calibration(raw.get("tokens", []), size[0]) if size else {
         "status": "NOT_CALIBRATED", "axis_labels": [], "price_per_pixel": None, "intercept": None}
     quote = _horizontal_quote(p, calibration) if size else {"status": "NOT_AVAILABLE", "price": None}
+    try:
+        from ENGINE.chart_indicator_vision import analyze_indicator_panes
+        vision = analyze_indicator_panes(p, tf, visual_panes, legend_roi)
+    except Exception as exc:
+        vision = {"status": "VISION_ENGINE_UNAVAILABLE", "error": f"{type(exc).__name__}: {exc}"}
     return {
         "version": VERSION, "source_file": p.name, "timeframe": tf,
+        "indicator_vision": vision,
         "timeframe_source": timeframe_source,
         "detected_timeframes": detected, "status": raw["status"],
         "image_size": raw.get("image_size"), "ocr_text": text,
@@ -232,14 +238,25 @@ def table18_template(reference_price: float | None = None) -> dict[str, Any]:
             "numeric_policy": "Unknown values are null; never replace missing data with zero or estimates."}
 
 
-def build_visual_audit(images: dict[str, str | Path], output: str | Path | None = None) -> dict[str, Any]:
-    charts = {str(label): audit_chart(path, str(label)) for label, path in images.items()}
+def build_visual_audit(images: dict[str, Any], output: str | Path | None = None) -> dict[str, Any]:
+    charts = {}
+    for label, spec in images.items():
+        if isinstance(spec, dict):
+            path = spec.get("path")
+            timeframe = spec.get("timeframe", str(label))
+            pane_rois = spec.get("pane_rois")
+            legend_roi = spec.get("legend_roi")
+        else:
+            path, timeframe, pane_rois, legend_roi = spec, str(label), None, None
+        charts[str(label)] = audit_chart(path, timeframe, pane_rois, legend_roi)
     observed = [chart.get("timeframe") for chart in charts.values() if chart.get("timeframe")]
     duplicates = sorted({tf for tf in observed if observed.count(tf) > 1})
     missing = [tf for tf in TIMEFRAMES if tf not in observed]
     # No artificial synchronization: preserve each chart's own source and time labels.
     report = {
         "version": VERSION, "mode": "READ_ONLY_RESEARCH_ONLY",
+        "indicator_vision_version": "1.0.0",
+        "vision_policy": "Only configured pane ROIs are analyzed; color identity is not mapped to EMA periods or signal lines without verified legend mapping.",
         "charts": charts, "table18": table18_template(),
         "visual_timeframe_audit": {
             "observed_timeframes": observed,

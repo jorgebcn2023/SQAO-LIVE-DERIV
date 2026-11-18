@@ -21,7 +21,7 @@ The quantitative snapshot is supplied by the SQAO backend and is the live-data s
 Rules:
 - Detect timeframe from the visible chart label first, then filename.
 - Never invent prices, indicators, levels, timestamps, volatility, ATR, spread, slippage, or other values.
-- Use the supplied OCR/geometry audit as an additional extraction channel; reconcile it with visual reading and flag OCR uncertainty.
+- Use the supplied OCR/geometry and indicator-trace audit as additional extraction channels; reconcile legend hue matches, pane-axis calibration, trace evolution and OCR uncertainty. Treat all pixel-derived values/zones as VISUAL_ESTIMATE, never as DERIVED/API values.
 - Transcribe every legible numeric label, axis price, MACD readout, timeframe and timestamp from every uploaded chart.
 - Keep screenshot-derived values labelled VISUAL_OBSERVATION or VISUAL_ESTIMATE; do not call them OHLC or executable quotes.
 - For Table 18, output the full numeric schema for LONG and SHORT; use null/NOT_AVAILABLE for unreadable or unsupported fields, never omit columns or fabricate values.
@@ -29,7 +29,7 @@ Rules:
 - Check whether uploaded charts are synchronized. Flag missing, duplicated, stale, or contradictory timeframes.
 - The quantitative MTF synchronization gate is mandatory. If mtf_sync_gate.status is BLOCKED, do not issue an actionable entry; return NO_TRADE or WAIT and list every blocker.
 - Require timestamped quantitative closed candles for all six frames. Screenshot axis labels are not OHLC timestamps and cannot satisfy the gate.
-- Compare visual structure against quantitative direction, EMA, RSI, ATR and latest close when supplied.
+- Compare visual structure against quantitative direction, EMA, RSI, ATR and latest close when supplied. Explicitly report visual legend mapping status, pane axis-calibration status, and any visual-vs-OHLC indicator disagreement. Unmapped lines or low-confidence scales must remain NOT_ASSESSED.
 - Report quant/vision disagreement explicitly.
 - Prefer WAIT or NO_TRADE when evidence is incomplete, stale, contradictory, or materially extended.
 - Return exactly one final decision: LONG, SHORT, WAIT, or NO_TRADE.
@@ -79,6 +79,7 @@ def analyze_images(
     market_snapshot: dict | None = None,
     model: str | None = None,
     api_key: str | None = None,
+    visual_panes: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     key = (api_key or os.getenv("OPENAI_API_KEY", "")).strip()
     if not key:
@@ -94,7 +95,16 @@ def analyze_images(
     client = OpenAI(api_key=key)
     snapshot_text = json.dumps(market_snapshot or {}, ensure_ascii=False, indent=2)[:50000]
     image_manifest = "\n".join(f"- {label}" for _, label in image_items)
-    visual_audit = build_visual_audit({label: path for path, label in image_items})
+    visual_inputs = {}
+    for path, label in image_items:
+        config = (visual_panes or {}).get(label) or {}
+        if isinstance(config, dict) and "pane_rois" in config:
+            visual_inputs[label] = {"path": path, "timeframe": label,
+                                    "pane_rois": config.get("pane_rois"),
+                                    "legend_roi": config.get("legend_roi")}
+        else:
+            visual_inputs[label] = {"path": path, "timeframe": label, "pane_rois": config}
+    visual_audit = build_visual_audit(visual_inputs)
     sync_audit = audit_mtf_synchronization(market_snapshot)
     visual_audit["mtf_sync_gate"] = sync_audit
     visual_audit_text = json.dumps(visual_audit, ensure_ascii=False, indent=2)[:50000]
