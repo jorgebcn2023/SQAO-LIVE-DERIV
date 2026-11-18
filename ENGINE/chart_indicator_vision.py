@@ -104,7 +104,10 @@ def _ocr_legend_colors(path: Path, legend_roi: list[int] | None) -> dict[str, An
     if x1 <= x0 or y1 <= y0:
         return {"status": "ROI_OUT_OF_BOUNDS", "labels": {}}
     crop = image[y0:y1, x0:x1]
-    data = pytesseract.image_to_data(crop, output_type=Output.DICT, config="--psm 11")
+    try:
+        data = pytesseract.image_to_data(crop, output_type=Output.DICT, config="--psm 11")
+    except Exception as exc:
+        return {"status": "OCR_ENGINE_UNAVAILABLE", "reason": type(exc).__name__, "labels": {}}
     lines: dict[tuple, list[int]] = {}
     for i, raw in enumerate(data.get("text", [])):
         token = str(raw).strip()
