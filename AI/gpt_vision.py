@@ -79,6 +79,7 @@ def analyze_images(
     market_snapshot: dict | None = None,
     model: str | None = None,
     api_key: str | None = None,
+    visual_panes: dict[str, dict[str, list[int]]] | None = None,
 ) -> str:
     key = (api_key or os.getenv("OPENAI_API_KEY", "")).strip()
     if not key:
@@ -94,7 +95,8 @@ def analyze_images(
     client = OpenAI(api_key=key)
     snapshot_text = json.dumps(market_snapshot or {}, ensure_ascii=False, indent=2)[:50000]
     image_manifest = "\n".join(f"- {label}" for _, label in image_items)
-    visual_audit = build_visual_audit({label: path for path, label in image_items})
+    visual_inputs = {label: {"path": path, "timeframe": label, "pane_rois": (visual_panes or {}).get(label)} for path, label in image_items}
+    visual_audit = build_visual_audit(visual_inputs)
     sync_audit = audit_mtf_synchronization(market_snapshot)
     visual_audit["mtf_sync_gate"] = sync_audit
     visual_audit_text = json.dumps(visual_audit, ensure_ascii=False, indent=2)[:50000]
