@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sqao-live-api-v2.onrender.com/schemas/sqao-visual-audit-v3.2.1.json",
+  "title": "SQAO Visual Audit V3.2.1",
+  "type": "object",
+  "required": ["schema_version", "source_file", "sha256", "provenance", "mode", "ocr_status", "indicator_observations", "ohlc", "decision", "execution_eligible"],
+  "properties": {
+    "schema_version": {"const": "3.2.1"},
+    "source_file": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+    "timeframe": {"enum": ["D1", "H4", "H1", "M15", "M5", "M1", null]},
+    "capture_timestamp": {"type": ["string", "null"], "format": "date-time"},
+    "provenance": {"const": "VISUAL_RAW"},
+    "mode": {"const": "READ_ONLY_RESEARCH_ONLY"},
+    "ocr_status": {"enum": ["NOT_RUN", "OCR_OK", "DEPENDENCY_MISSING", "OCR_ENGINE_ERROR"]},
+    "tokens": {"type": "array", "items": {"type": "object", "required": ["text", "confidence", "bbox", "numeric"], "properties": {
+      "text": {"type": "string"},
+      "confidence": {"type": ["number", "null"]},
+      "numeric": {"type": "boolean"},
+      "bbox": {"type": "object", "required": ["x", "y", "width", "height"], "properties": {
+        "x": {"type": "integer", "minimum": 0}, "y": {"type": "integer", "minimum": 0},
+        "width": {"type": "integer", "minimum": 0}, "height": {"type": "integer", "minimum": 0}
+      }, "additionalProperties": false}
+    }, "additionalProperties": true}},
+    "indicator_observations": {"type": "object", "properties": {
+      "ema": {"$ref": "#/$defs/observation"},
+      "bollinger": {"$ref": "#/$defs/observation"},
+      "rsi": {"$ref": "#/$defs/observation"},
+      "macd": {"$ref": "#/$defs/observation"},
+      "adx": {"$ref": "#/$defs/observation"},
+      "plus_di": {"$ref": "#/$defs/observation"},
+      "minus_di": {"$ref": "#/$defs/observation"},
+      "stochastic": {"$ref": "#/$defs/observation"}
+    }, "additionalProperties": true},
+    "ohlc": {"type": "null"},
+    "decision": {"const": "NO_TRADE"},
+    "execution_eligible": {"const": false}
+  },
+  "$defs": {
+    "observation": {
+      "type": "object",
+      "required": ["status", "value", "label_seen", "curve_geometry"],
+      "properties": {
+        "status": {"enum": ["EXACT_READ", "VISUAL_ESTIMATE", "LOW_CONFIDENCE", "NOT_AVAILABLE"]},
+        "value": {"type": ["number", "string", "null"]},
+        "label_seen": {"type": "boolean"},
+        "curve_geometry": {"type": ["object", "null"]},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "parameters": {"type": ["object", "null"]},
+        "note": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
