@@ -84,6 +84,131 @@ def _trace_colors(crop, min_saturation: int = 65, min_value: int = 55):
     return selected[:8]
 
 
+
+def _ocr_legend_colors(path: Path, legend_roi: list[int] | None) -> dict[str, Any]:
+    """OCR legend labels and sample their colored glyph pixels."""
+    if not legend_roi:
+        return {"status": "NOT_CONFIGURED", "labels": {}}
+    cv2, np = _load_cv()
+    try:
+        import pytesseract
+        from pytesseract import Output
+    except Exception as exc:
+        return {"status": "OCR_UNAVAILABLE", "reason": type(exc).__name__, "labels": {}}
+    image = cv2.imread(str(path))
+    if image is None:
+        return {"status": "IMAGE_UNREADABLE", "labels": {}}
+    h, w = image.shape[:2]
+    x, y, rw, rh = [int(v) for v in legend_roi]
+    x0, y0, x1, y1 = max(0,x), max(0,y), min(w,x+rw), min(h,y+rh)
+    if x1 <= x0 or y1 <= y0:
+        return {"status": "ROI_OUT_OF_BOUNDS", "labels": {}}
+    crop = image[y0:y1, x0:x1]
+    data = pytesseract.image_to_data(crop, output_type=Output.DICT, config="--psm 11")
+    lines: dict[tuple, list[int]] = {}
+    for i, raw in enumerate(data.get("text", [])):
+        token = str(raw).strip()
+        try:
+            conf = float(data["conf"][i])
+        except Exception:
+            conf = -1
+        if not token or conf < 35:
+            continue
+        key = (data.get("block_num",[0])[i], data.get("par_num",[0])[i], data.get("line_num",[0])[i])
+        lines.setdefault(key, []).append(i)
+    patterns = {
+        "EMA_9": r"ema\s*9|ema9|moving average.{0,8}9",
+        "EMA_20": r"ema\s*20|ema20|moving average.{0,8}20",
+        "EMA_50": r"ema\s*50|ema50|moving average.{0,8}50",
+        "BOLLINGER": r"bollinger|bands|envelopes",
+        "RSI": r"\brsi\b", "MACD": r"\bmacd\b", "ADX": r"\badx\b",
+        "PLUS_DI": r"\+di|plus di", "MINUS_DI": r"-di|minus di",
+        "STOCHASTIC": r"stoch",
+    }
+    labels = {}
+    for ids in lines.values():
+        text = " ".join(str(data["text"][i]).strip() for i in ids)
+        matches = [name for name, pattern in patterns.items() if re.search(pattern, text, re.I)]
+        if not matches:
+            continue
+        bx = min(int(data["left"][i]) for i in ids)
+        by = min(int(data["top"][i]) for i in ids)
+        ex = max(int(data["left"][i])+int(data["width"][i]) for i in ids)
+        ey = max(int(data["top"][i])+int(data["height"][i]) for i in ids)
+        patch = crop[max(0,by):min(crop.shape[0],ey), max(0,bx):min(crop.shape[1],ex)]
+        if patch.size == 0:
+            continue
+        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+        hues = hsv[:,:,0][hsv[:,:,1] >= 55]
+        if len(hues) < 3:
+            continue
+        hue = int(np.median(hues))
+        for name in matches:
+            labels[name] = {"text": text, "hue_center_hsv": hue,
+                            "ocr_confidence": round(sum(float(data["conf"][i]) for i in ids)/len(ids),1),
+                            "status": "LEGEND_TEXT_AND_COLOR_OBSERVED"}
+    return {"status": "MAPPED" if labels else "NO_LEGEND_MATCH", "labels": labels}
+
+
+def _axis_scale(image, roi: list[int]) -> dict[str, Any]:
+    """Fit a linear scale from OCR numeric labels in the pane's rightmost 28%."""
+    cv2, np = _load_cv()
+    try:
+        import pytesseract
+        from pytesseract import Output
+    except Exception:
+        return {"status": "OCR_UNAVAILABLE", "points": []}
+    x, y, rw, rh = roi
+    h, w = image.shape[:2]
+    x0, y0, x1, y1 = max(0,x), max(0,y), min(w,x+rw), min(h,y+rh)
+    if x1 <= x0 or y1 <= y0:
+        return {"status": "ROI_OUT_OF_BOUNDS", "points": []}
+    ax0 = x0 + int((x1-x0)*0.72)
+    crop = image[y0:y1, ax0:x1]
+    data = pytesseract.image_to_data(crop, output_type=Output.DICT, config="--psm 11")
+    points = []
+    for i, raw in enumerate(data.get("text", [])):
+        token = str(raw).strip().replace(",", ".")
+        if not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", token):
+            continue
+        try:
+            value, conf = float(token), float(data["conf"][i])
+        except Exception:
+            continue
+        if conf < 35:
+            continue
+        py = y0 + int(data["top"][i]) + int(data["height"][i])/2
+        if not any(abs(py-q["y"]) < 4 and abs(value-q["value"]) < 1e-6 for q in points):
+            points.append({"y": py, "value": value, "confidence": conf})
+    if len(points) < 2:
+        return {"status": "INSUFFICIENT_AXIS_LABELS", "points": points}
+    ym = sum(p["y"] for p in points)/len(points)
+    vm = sum(p["value"] for p in points)/len(points)
+    denom = sum((p["y"]-ym)**2 for p in points)
+    if denom <= 0:
+        return {"status": "DEGENERATE_AXIS", "points": points}
+    slope = sum((p["y"]-ym)*(p["value"]-vm) for p in points)/denom
+    intercept = vm-slope*ym
+    mae = sum(abs(slope*p["y"]+intercept-p["value"]) for p in points)/len(points)
+    return {"status": "CALIBRATED" if len(points)>=3 else "LOW_CONFIDENCE",
+            "points": points, "value_per_pixel": slope, "intercept": intercept,
+            "mean_abs_fit_error": mae, "calibration_source": "OCR_NUMERIC_AXIS_LABELS"}
+
+
+def _attach_legend_identity(traces: list[dict[str, Any]], legend: dict[str, Any]) -> None:
+    labels = legend.get("labels", {})
+    for trace in traces:
+        hue = int(trace.get("hue_center_hsv", 0))
+        matches = []
+        for name, item in labels.items():
+            distance = abs(hue-int(item["hue_center_hsv"]))
+            distance = min(distance, 180-distance)
+            if distance <= 9:
+                matches.append({"line_id": name, "hue_distance": distance})
+        trace["legend_identity"] = matches[0] if len(matches)==1 else None
+        trace["legend_identity_status"] = "MATCHED" if len(matches)==1 else ("AMBIGUOUS" if matches else "UNMAPPED")
+
+
 def analyze_indicator_panes(path: str | Path, timeframe: str | None,
                             pane_rois: dict[str, list[int]] | None = None,
                             legend_roi: list[int] | None = None) -> dict[str, Any]:
