@@ -117,9 +117,9 @@ def _ocr_legend_colors(path: Path, legend_roi: list[int] | None) -> dict[str, An
         key = (data.get("block_num",[0])[i], data.get("par_num",[0])[i], data.get("line_num",[0])[i])
         lines.setdefault(key, []).append(i)
     patterns = {
-        "EMA_9": r"ema\s*9|ema9|moving average.{0,8}9",
-        "EMA_20": r"ema\s*20|ema20|moving average.{0,8}20",
-        "EMA_50": r"ema\s*50|ema50|moving average.{0,8}50",
+        "EMA_9": r"ema\s*\(?9|ema9|moving average.{0,8}9",
+        "EMA_20": r"ema\s*\(?20|ema20|moving average.{0,8}20",
+        "EMA_50": r"ema\s*\(?50|ema50|moving average.{0,8}50",
         "BOLLINGER": r"bollinger|bands|envelopes",
         "RSI": r"\brsi\b", "MACD": r"\bmacd\b", "ADX": r"\badx\b",
         "PLUS_DI": r"\+di|plus di", "MINUS_DI": r"-di|minus di",
