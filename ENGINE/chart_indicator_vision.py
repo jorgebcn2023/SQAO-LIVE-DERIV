@@ -358,7 +358,10 @@ def analyze_indicator_panes(path: str | Path, timeframe: str | None,
         "timeframe": timeframe, "image_size": [width, height],
         "legend_color_mapping": legend,
         "pane_layout_detection": auto_layout,
-        "status": "ANALYZED" if panes else ("PANE_LABELS_NOT_RECOGNIZED" if auto_layout.get("status") == "NO_LABEL_CONFIRMED_PANES" else "PANE_ROIS_REQUIRED"),
+        # No configured or label-confirmed ROI means no pane analysis was performed.
+        # Keep the public status stable; detailed OCR/layout diagnostics remain in
+        # pane_layout_detection and must not be mistaken for indicator recognition.
+        "status": "ANALYZED" if panes else "PANE_ROIS_REQUIRED",
         "panes": panes,
         "limitations": [
             "Color traces are image-space observations, not exact indicator values.",
