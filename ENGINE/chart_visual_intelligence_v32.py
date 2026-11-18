@@ -195,7 +195,7 @@ def detect_panel_regions(path: str | Path, *, dark_threshold: int = 90,
     if not (0.0 < min_panel_height_ratio < 1.0):
         raise ValueError("min_panel_height_ratio must be in (0, 1)")
     try:
-        from PIL import Image, ImageStat
+        from PIL import Image
         with Image.open(source) as original:
             gray = original.convert("L")
             width, height = gray.size
@@ -206,11 +206,18 @@ def detect_panel_regions(path: str | Path, *, dark_threshold: int = 90,
             if sample_width != width:
                 gray = gray.resize((sample_width, height))
             pixels = gray.load()
-            separators = []
-            for y in range(1, height - 1):
+            row_coverage_values = []
+            for y in range(height):
                 dark_count = sum(1 for x in range(sample_width)
                                  if pixels[x, y] <= dark_threshold)
-                if dark_count / sample_width >= row_coverage:
+                row_coverage_values.append(dark_count / sample_width)
+            separators = []
+            for y in range(1, height - 1):
+                current = row_coverage_values[y]
+                adjacent = max(row_coverage_values[y - 1], row_coverage_values[y + 1])
+                # Require a thin dark line that contrasts with both neighboring rows;
+                # avoids treating an entire dark-theme chart background as a separator.
+                if current >= row_coverage and current - adjacent >= 0.25:
                     separators.append(y)
             # Collapse adjacent separator rows into their midpoint.
             groups = []
