@@ -50,3 +50,10 @@ The GitHub Actions test workflow includes the new regression test. A successful 
 `READ_ONLY=true`, `RESEARCH_ONLY=true`, `decision=NO_TRADE`, `execution_eligible=false`.
 
 This branch is an integration checkpoint, not a claim that full curve recognition, numeric indicator extraction, API reconciliation or deployment is complete.
+
+
+## V3.2.1 panel geometry extension
+
+The visual engine now includes `detect_panel_regions(path)`, a conservative geometry helper that looks for thin, high-coverage horizontal separators. It returns candidate vertical bands only. It does not classify indicator panels, trace curves, infer EMA/Bollinger identities, or extract RSI/MACD/ADX/Stochastic values. Dark-theme backgrounds are guarded by requiring contrast with adjacent rows. Synthetic regression tests cover a horizontal separator and a uniform dark background.
+
+This is a first-stage layout primitive. Semantic panel classification and curve-to-legend attribution remain unimplemented and must not be represented as validated capabilities.
