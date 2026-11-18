@@ -33,3 +33,26 @@ This calibration only maps vertical pixel positions to price. It does not recove
 ```bash
 python -m unittest ENGINE.test_image_intelligence
 ```
+
+## SQAO Indicator Vision V3.2.0
+
+The existing OCR/geometry audit optionally analyzes colored traces in explicitly configured indicator-pane regions. Supported panes: EMA, Bollinger, RSI, MACD, ADX and Stochastic. The visual audit can be run independently for D1/H4/H1/M15/M5/M1.
+
+Example:
+
+```python
+from ENGINE.chart_visual_extraction import build_visual_audit
+report = build_visual_audit({
+  'M5': {'path': 'charts/StepIndex_M5.png', 'timeframe': 'M5', 'pane_rois': {
+    'EMA': [80, 80, 900, 360], 'BOLLINGER': [80, 80, 900, 360],
+    'MACD': [80, 450, 900, 130], 'RSI': [80, 590, 900, 110],
+    'ADX': [80, 710, 900, 100], 'STOCHASTIC': [80, 820, 900, 100]
+  }}
+})
+```
+
+ROI coordinates are [x, y, width, height] in original image pixels. Configure actual chart layout; example coordinates are illustrative only. The engine reports trace coverage and image-space rising/falling/flat evolution. Bollinger reports a geometric band-width change when two boundary traces are present.
+
+EMA9/20/50, +DI/-DI and signal-line identities are not assigned from color alone; verified legend-color mapping is required. Pixel direction is not an exact price or indicator value. No screenshot-derived OHLC is created.
+
+The OpenCV module is ENGINE/chart_indicator_vision.py. Run tests with python -m ENGINE.test_chart_indicator_vision. The GPT vision entry point accepts an optional visual_panes mapping keyed by uploaded image label.
