@@ -13,16 +13,16 @@ from typing import Any
 
 TIMEFRAMES = ("D1", "H4", "H1", "M15", "M5", "M1")
 VALID_STATES = {"EXACT_READ", "VISUAL_ESTIMATE", "NOT_AVAILABLE", "LOW_CONFIDENCE"}
-NUMERIC = re.compile(r"^[+-]?\\d+(?:[.,]\\d+)?$")
+NUMERIC = re.compile(r"^[+-]?\d+(?:[.,]\d+)?$")
 LABELS = {
-    "ema": re.compile(r"\\bEMA\\s*\\d+\\b", re.I),
-    "bollinger": re.compile(r"\\b(BB|BOLLINGER)\\b", re.I),
-    "rsi": re.compile(r"\\bRSI\\s*\\(?\\s*\\d+", re.I),
-    "macd": re.compile(r"\\bMACD\\s*\\(?\\s*\\d+", re.I),
-    "adx": re.compile(r"\\bADX\\s*\\(?\\s*\\d+", re.I),
-    "plus_di": re.compile(r"\\+DI\\s*\\(?\\s*\\d+", re.I),
-    "minus_di": re.compile(r"-DI\\s*\\(?\\s*\\d+", re.I),
-    "stochastic": re.compile(r"\\b(STOCH|STOCHASTIC)\\b", re.I),
+    "ema": re.compile(r"\bEMA\s*\d+\b", re.I),
+    "bollinger": re.compile(r"\b(BB|BOLLINGER)\b", re.I),
+    "rsi": re.compile(r"\bRSI\s*\(?\s*\d+", re.I),
+    "macd": re.compile(r"\bMACD\s*\(?\s*\d+", re.I),
+    "adx": re.compile(r"\bADX\s*\(?\s*\d+", re.I),
+    "plus_di": re.compile(r"\+DI\s*\(?\s*\d+", re.I),
+    "minus_di": re.compile(r"-DI\s*\(?\s*\d+", re.I),
+    "stochastic": re.compile(r"\b(STOCH|STOCHASTIC)\b", re.I),
 }
 
 
