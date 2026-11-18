@@ -437,6 +437,16 @@ async def analysis_snapshot(
         technical_direction=None,
     )
 
+    # V3.2.1-ALT is a separate diagnostic layer over the same validated,
+    # closed OHLC frames. It cannot modify the canonical NO_TRADE decision.
+    from ENGINE.stochastic.integration import audit_mtf_closed_frames
+    alt_stochastic = audit_mtf_closed_frames(
+        frames,
+        symbol=resolved,
+        generated_at_utc=generated_at.isoformat(),
+        expected_count=count,
+    )
+
     # This endpoint is research-only. Costs/OOS are not certified by live signal confirmation.
     return {
         "api_version": "2.6.0",
@@ -444,8 +454,9 @@ async def analysis_snapshot(
         "mtf_sync_version": MTF_SYNC_VERSION,
         "mtf_sync_gate": mtf_sync_gate,
         "mtf_sync_passed": mtf_sync_passed,
-        "engine": "SQAO_STEP_INDEX_V23_CANONICAL_WITH_V35_RESEARCH",
+        "engine": "SQAO_STEP_INDEX_V23_CANONICAL_WITH_V35_AND_V321_ALT_RESEARCH",
         "v35_research": v35_research,
+        "alt_stochastic": alt_stochastic,
         "symbol": resolved,
         "symbol_resolution": mode,
         "source": "Deriv public market data",
