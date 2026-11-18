@@ -169,3 +169,15 @@ The source PDF "Optimización Operativa Step Index" is treated as research mater
 V2.6 unifica la versión visible del API y la documentación GPT en 2.6.0. Añade un `integrity_gate` separado de la sincronización MTF: exige sincronización temporal aprobada, muestra mínima alineada y ausencia de bloqueo por ventana de señal no contigua. `candidate_confirmed` solo puede ser true si el setup, MTF y gate de integridad pasan conjuntamente. Esto no autoriza ejecución: `decision=NO_TRADE`, `execution_eligible=false` y `cost_gate=BLOCKED_MISSING_VERIFIABLE_ALL_IN_COST` se mantienen hasta validar costes y elegibilidad OOS de forma independiente.
 
 Archivos GPT: `GPT/PROMPT_MAESTRO_V2.6_ES.md` y `GPT/SQAO_GPT_INSTRUCTIONS.md`. Pruebas API: `python -m unittest API.test_app`. No se despliega automáticamente desde esta rama. El estado LIVE de Render no sustituye una comprobación HTTP real.
+
+## SQAO LIVE DERIV V3.2.0 — Indicator Vision
+
+The existing OCR engine is extended (not duplicated) by ENGINE/chart_indicator_vision.py. It tracks colored line geometry in configured EMA, Bollinger, RSI, MACD, ADX and Stochastic pane regions for D1/H4/H1/M15/M5/M1. The visual audit remains separate from closed-OHLC calculations in ENGINE/chart_indicator_audit.py.
+
+- Configure pane ROIs in original image pixels via pane_rois={'RSI': [x,y,width,height], ...}.
+- Outputs include trace coverage and image-space rising/falling/flat evolution.
+- Indicator/line identity is not inferred from color alone; EMA periods, DI lines and signal lines require verified legend mapping.
+- Visual evidence never becomes OHLC, exact indicator values, backtest input or execution levels.
+- Optional GPT Vision argument: visual_panes, keyed by uploaded image label.
+
+Run tests: python -m ENGINE.test_chart_indicator_vision.
