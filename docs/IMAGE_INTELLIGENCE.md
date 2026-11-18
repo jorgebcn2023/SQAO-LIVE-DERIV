@@ -62,3 +62,8 @@ The OpenCV module is ENGINE/chart_indicator_vision.py. Run tests with python -m 
 Pass `legend_roi=[x,y,width,height]` alongside `pane_rois` for a chart-level indicator legend. OCR groups legend text, then samples the rendered text hue and associates it with trace hues only within a conservative hue tolerance. Unmatched or ambiguous identities remain null. Each configured pane also attempts OCR calibration from numeric labels in its rightmost 28%; a calibration needs at least two distinct labels and is tagged `CALIBRATED` or `LOW_CONFIDENCE`. Pixel-to-value points are `VISUAL_ESTIMATE_FROM_OCR_AXIS`, never API/DERIVED values.
 
 When the scale and legend both pass, RSI/Stochastic/ADX/MACD can receive a visual threshold/zero-line classification; EMA9/20/50 stack order is reported only if all three legend identities are independently mapped. These classifications are not quantitative signals and must not alter the OHLC engine decision.
+
+
+### Automatic pane localization
+
+If `pane_rois` is omitted, the vision engine runs OCR label-guided localization for visible EMA, Bollinger, RSI, MACD, ADX and Stochastic labels. It groups nearby labels and estimates panel boundaries from label vertical positions. The result is explicitly tagged `LABEL_GUIDED` and `HEURISTIC_REQUIRES_OPERATOR_REVIEW`. Unlabelled panels are not guessed; configure `pane_rois` manually when labels are absent, cropped or ambiguous. The visual audit now attempts this pass for every chart image by default.
