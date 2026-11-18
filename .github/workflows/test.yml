@@ -89,3 +89,6 @@ jobs:
               raise SystemExit('Incomplete MTF snapshot')
           print('LIVE_V23_MTF_SNAPSHOT_OK')
           PY
+
+      - name: Validate SQAO V3.2.1 plugin bundle
+        run: python PLUGIN/SQAO_LIVE_DERIV_V3.2.1/validate_package.py
