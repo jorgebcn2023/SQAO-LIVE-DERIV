@@ -185,13 +185,11 @@ def audit_chart(path: str | Path, timeframe: str | None = None, visual_panes: di
     calibration = _axis_calibration(raw.get("tokens", []), size[0]) if size else {
         "status": "NOT_CALIBRATED", "axis_labels": [], "price_per_pixel": None, "intercept": None}
     quote = _horizontal_quote(p, calibration) if size else {"status": "NOT_AVAILABLE", "price": None}
-    vision = {"status": "NOT_REQUESTED"}
-    if visual_panes:
-        try:
-            from ENGINE.chart_indicator_vision import analyze_indicator_panes
-            vision = analyze_indicator_panes(p, tf, visual_panes, legend_roi)
-        except Exception as exc:
-            vision = {"status": "VISION_ENGINE_UNAVAILABLE", "error": f"{type(exc).__name__}: {exc}"}
+    try:
+        from ENGINE.chart_indicator_vision import analyze_indicator_panes
+        vision = analyze_indicator_panes(p, tf, visual_panes, legend_roi)
+    except Exception as exc:
+        vision = {"status": "VISION_ENGINE_UNAVAILABLE", "error": f"{type(exc).__name__}: {exc}"}
     return {
         "version": VERSION, "source_file": p.name, "timeframe": tf,
         "indicator_vision": vision,
