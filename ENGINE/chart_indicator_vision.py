@@ -390,7 +390,7 @@ def _semantic_observations(name: str, traces: list[dict[str, Any]],
     if name == "EMA":
         levels = {x["line_id"]: x for x in matched}
         required = ("EMA_9", "EMA_20", "EMA_50")
-        if all(k in levels and levels[k]["last_axis_value_estimate"] is not None for k in required):
+        if scale.get("status") == "CALIBRATED" and all(k in levels and levels[k]["last_axis_value_estimate"] is not None for k in required):
             a,b,d = (levels[k]["last_axis_value_estimate"] for k in required)
             base["ema_stack_order"] = ("BULLISH_9_GT_20_GT_50" if a>b>d else
                                        "BEARISH_9_LT_20_LT_50" if a<b<d else "MIXED")
