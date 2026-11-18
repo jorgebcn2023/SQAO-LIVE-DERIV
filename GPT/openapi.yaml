@@ -457,3 +457,7 @@ components:
         v35_research:
           type: object
           additionalProperties: true
+        alt_stochastic:
+          type: object
+          description: Independent per-timeframe V3.2.1-ALT research diagnostics. Does not infer MTF synchronization, signal direction, win probability, or execution eligibility.
+          additionalProperties: true
