@@ -60,6 +60,10 @@ Estados permitidos:
 
 No promover automáticamente LOW_CONFIDENCE a EXACT_READ.
 
+## Detección geométrica de paneles (V3.2.1)
+
+`detect_panel_regions(path)` identifica bandas verticales candidatas a partir de separadores horizontales de alto contraste. El resultado es exclusivamente geométrico: `classification=UNCLASSIFIED` y `curve_attribution=NOT_PERFORMED`. No determina si una banda es precio, RSI, MACD u otro indicador. Puede producir falsos positivos por líneas de cuadrícula o temas gráficos; requiere revisión y fixtures de referencia antes de ampliar su uso.
+
 ## Cálculo cuantitativo
 Cuando haya OHLC suficiente, declarar fórmula, parámetros, periodo de calentamiento y tratamiento de datos faltantes para EMA, Bollinger, RSI, MACD, ATR, ADX/DI, Stochastic, pivots y Fibonacci. Los resultados derivados deben conservar referencia a los datos API usados. No calcular backtests desde capturas.
 
