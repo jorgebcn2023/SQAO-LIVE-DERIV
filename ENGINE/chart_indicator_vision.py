@@ -7,8 +7,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import math
+import re
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 SUPPORTED = ("EMA", "BOLLINGER", "RSI", "MACD", "ADX", "STOCHASTIC")
 
 
@@ -84,7 +85,8 @@ def _trace_colors(crop, min_saturation: int = 65, min_value: int = 55):
 
 
 def analyze_indicator_panes(path: str | Path, timeframe: str | None,
-                            pane_rois: dict[str, list[int]] | None = None) -> dict[str, Any]:
+                            pane_rois: dict[str, list[int]] | None = None,
+                            legend_roi: list[int] | None = None) -> dict[str, Any]:
     """Analyze named pane ROIs: {EMA:[x,y,w,h], RSI:[...], ...}, pixel coordinates."""
     cv2, np = _load_cv()
     p = Path(path)
@@ -92,6 +94,7 @@ def analyze_indicator_panes(path: str | Path, timeframe: str | None,
     if image is None:
         return {"status": "IMAGE_UNREADABLE", "timeframe": timeframe, "panes": {}}
     height, width = image.shape[:2]
+    legend = _ocr_legend_colors(p, legend_roi)
     panes: dict[str, Any] = {}
     for raw_name, roi in (pane_rois or {}).items():
         name = str(raw_name).upper()
@@ -108,22 +111,37 @@ def analyze_indicator_panes(path: str | Path, timeframe: str | None,
             continue
         crop = image[y0:y1, x0:x1]
         traces = _trace_colors(crop)
+        _attach_legend_identity(traces, legend)
+        try:
+            scale = _axis_scale(image, [x0, y0, x1-x0, y1-y0])
+        except Exception as exc:
+            scale = {"status": "AXIS_OCR_FAILED", "reason": type(exc).__name__}
+        if scale.get("status") in ("CALIBRATED", "LOW_CONFIDENCE"):
+            for trace in traces:
+                for point in trace["points"]:
+                    py = y0 + point["y_norm"] * max(1, y1-y0-1)
+                    point["axis_value_estimate"] = round(scale["value_per_pixel"]*py+scale["intercept"], 4)
+                    point["axis_value_provenance"] = "VISUAL_ESTIMATE_FROM_OCR_AXIS"
         panes[name] = {
             "status": "TRACES_FOUND" if traces else "NO_COLOR_TRACE",
             "roi_xywh": [x0, y0, x1 - x0, y1 - y0],
             "association": "OPERATOR_CONFIGURED_PANE; indicator identity is not inferred from color",
             "trace_count": len(traces),
+            "axis_calibration": scale,
             "traces": traces,
             "indicator_specific_observations": _indicator_observations(name, traces),
         }
     return {
         "module": "SQAO_CHART_INDICATOR_VISION", "version": VERSION,
         "timeframe": timeframe, "image_size": [width, height],
+        "legend_color_mapping": legend,
         "status": "ANALYZED" if panes else "PANE_ROIS_REQUIRED",
         "panes": panes,
         "limitations": [
             "Color traces are image-space observations, not exact indicator values.",
             "Indicator-to-pane association requires configured ROI or independently verified label.",
+            "Legend-color matches are OCR/pixel estimates; ambiguous hue matches remain unmapped.",
+            "Axis calibration is accepted only from at least two OCR numeric labels and remains a visual estimate.",
             "No price/oscillator values, OHLC candles, timestamps or trade levels are reconstructed.",
             "Color themes, anti-aliasing, overlapping traces and chart zoom can reduce detection reliability.",
         ],
