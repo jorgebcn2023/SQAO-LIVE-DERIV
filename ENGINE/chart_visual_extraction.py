@@ -162,7 +162,7 @@ def _extract_indicator_readings(text: str) -> dict[str, Any]:
     return result
 
 
-def audit_chart(path: str | Path, timeframe: str | None = None, visual_panes: dict[str, list[int]] | None = None) -> dict[str, Any]:
+def audit_chart(path: str | Path, timeframe: str | None = None, visual_panes: dict[str, list[int]] | None = None, legend_roi: list[int] | None = None) -> dict[str, Any]:
     p = Path(path)
     if not p.is_file():
         return {"source": str(p), "status": "FILE_NOT_FOUND"}
@@ -189,7 +189,7 @@ def audit_chart(path: str | Path, timeframe: str | None = None, visual_panes: di
     if visual_panes:
         try:
             from ENGINE.chart_indicator_vision import analyze_indicator_panes
-            vision = analyze_indicator_panes(p, tf, visual_panes)
+            vision = analyze_indicator_panes(p, tf, visual_panes, legend_roi)
         except Exception as exc:
             vision = {"status": "VISION_ENGINE_UNAVAILABLE", "error": f"{type(exc).__name__}: {exc}"}
     return {
@@ -247,9 +247,10 @@ def build_visual_audit(images: dict[str, Any], output: str | Path | None = None)
             path = spec.get("path")
             timeframe = spec.get("timeframe", str(label))
             pane_rois = spec.get("pane_rois")
+            legend_roi = spec.get("legend_roi")
         else:
-            path, timeframe, pane_rois = spec, str(label), None
-        charts[str(label)] = audit_chart(path, timeframe, pane_rois)
+            path, timeframe, pane_rois, legend_roi = spec, str(label), None, None
+        charts[str(label)] = audit_chart(path, timeframe, pane_rois, legend_roi)
     observed = [chart.get("timeframe") for chart in charts.values() if chart.get("timeframe")]
     duplicates = sorted({tf for tf in observed if observed.count(tf) > 1})
     missing = [tf for tf in TIMEFRAMES if tf not in observed]
