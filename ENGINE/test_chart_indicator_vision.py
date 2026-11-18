@@ -49,6 +49,21 @@ class IndicatorVisionTests(unittest.TestCase):
         self.assertEqual(result["latest_zone_visual_estimate"], "OVERBOUGHT_ABOVE_70")
         self.assertTrue(result["numeric_readings_are_visual_estimates"])
 
+
+    def test_auto_detects_labelled_indicator_pane(self):
+        image = np.zeros((180, 420, 3), dtype=np.uint8)
+        cv2.putText(image, "RSI (14)", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                    (255, 255, 255), 2, cv2.LINE_AA)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "labelled.png"
+            cv2.imwrite(str(path), image)
+            from ENGINE.chart_indicator_vision import auto_detect_indicator_panes
+            result = auto_detect_indicator_panes(path)
+        self.assertIn(result["status"], ("LABEL_GUIDED", "OCR_UNAVAILABLE", "OCR_ENGINE_UNAVAILABLE"))
+        if result["status"] == "LABEL_GUIDED":
+            self.assertIn("RSI", result["pane_rois"])
+            self.assertEqual(len(result["pane_rois"]["RSI"]), 4)
+
     def test_missing_rois_does_not_guess_indicators(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "blank.png"
