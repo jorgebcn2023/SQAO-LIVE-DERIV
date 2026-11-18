@@ -1,4 +1,4 @@
-"""SQAO V3.2.0 visual evidence intake.
+"""SQAO V3.2.1 visual evidence intake.
 
 Records screenshot evidence without converting pixels into OHLC or unverified
 indicator values. Indicator curves remain unidentified until a validated
@@ -64,7 +64,7 @@ def audit_image(path: str | Path, timeframe: str | None = None,
     if not source.is_file():
         return {"status": "FILE_NOT_FOUND", "source_file": source.name}
     result: dict[str, Any] = {
-        "schema_version": "3.2.0",
+        "schema_version": "3.2.1",
         "source_file": source.name,
         "sha256": _sha256(source),
         "timeframe": _timeframe(timeframe),
@@ -174,3 +174,81 @@ def audit_mtf(images: dict[str, dict[str, Any]],
         "decision": "NO_TRADE",
         "execution_eligible": False,
     }
+
+
+def detect_panel_regions(path: str | Path, *, dark_threshold: int = 90,
+                         row_coverage: float = 0.82,
+                         min_panel_height_ratio: float = 0.06) -> dict[str, Any]:
+    """Detect chart subpanel bands using full-width horizontal separators.
+
+    This returns coarse panel geometry only. It does not classify a panel as
+    price/EMA/Bollinger/RSI/MACD/ADX/Stochastic and never traces indicator curves.
+    A separator must cover a configurable fraction of the image width.
+    """
+    source = Path(path)
+    if not source.is_file():
+        return {"status": "FILE_NOT_FOUND", "panels": []}
+    if not (0 <= dark_threshold <= 255):
+        raise ValueError("dark_threshold must be between 0 and 255")
+    if not (0.0 < row_coverage <= 1.0):
+        raise ValueError("row_coverage must be in (0, 1]")
+    if not (0.0 < min_panel_height_ratio < 1.0):
+        raise ValueError("min_panel_height_ratio must be in (0, 1)")
+    try:
+        from PIL import Image, ImageStat
+        with Image.open(source) as original:
+            gray = original.convert("L")
+            width, height = gray.size
+            if width < 8 or height < 16:
+                return {"status": "IMAGE_TOO_SMALL", "panels": [], "image_size": [width, height]}
+            # Downsample horizontally to cap work on high-resolution screenshots.
+            sample_width = min(width, 1000)
+            if sample_width != width:
+                gray = gray.resize((sample_width, height))
+            pixels = gray.load()
+            separators = []
+            for y in range(1, height - 1):
+                dark_count = sum(1 for x in range(sample_width)
+                                 if pixels[x, y] <= dark_threshold)
+                if dark_count / sample_width >= row_coverage:
+                    separators.append(y)
+            # Collapse adjacent separator rows into their midpoint.
+            groups = []
+            for y in separators:
+                if not groups or y > groups[-1][-1] + 1:
+                    groups.append([y])
+                else:
+                    groups[-1].append(y)
+            boundaries = [0]
+            boundaries.extend(int(round(sum(group) / len(group))) for group in groups)
+            boundaries.append(height - 1)
+            min_height = max(8, int(height * min_panel_height_ratio))
+            panels = []
+            for top, bottom in zip(boundaries, boundaries[1:]):
+                if bottom - top >= min_height:
+                    panels.append({"top": top, "bottom": bottom,
+                                   "height": bottom - top,
+                                   "center_y": round((top + bottom) / 2, 2)})
+            # Deduplicate adjacent separator detections that produce no meaningful band.
+            if not panels:
+                return {"status": "NO_PANEL_BANDS_DETECTED", "panels": [],
+                        "image_size": [width, height], "separator_rows": len(separators)}
+            return {
+                "status": "GEOMETRY_DETECTED",
+                "image_size": [width, height],
+                "panels": panels,
+                "separator_count": len(groups),
+                "confidence": min(0.95, 0.55 + 0.08 * len(groups)),
+                "classification": "UNCLASSIFIED",
+                "curve_attribution": "NOT_PERFORMED",
+                "provenance": "VISUAL_RAW",
+                "limitations": [
+                    "Panel bands are geometric candidates, not semantic indicator identities.",
+                    "Horizontal gridlines or dark chart themes may create false separators.",
+                    "No curve tracing or numeric indicator attribution is performed.",
+                ],
+            }
+    except ImportError as exc:
+        return {"status": "DEPENDENCY_MISSING", "panels": [], "error": str(exc)}
+    except Exception as exc:
+        return {"status": "IMAGE_DECODE_ERROR", "panels": [], "error": str(exc)}
